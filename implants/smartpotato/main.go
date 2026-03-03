@@ -7,7 +7,7 @@ import (
 	"os"
 	"runtime"
 	"time"
-	"unsafe"
+	
 )
 
 // SmartPotato is a highly obfuscated ALL-IN-ONE potato implementation.
