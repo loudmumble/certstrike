@@ -1,0 +1,25 @@
+# Binaries
+certstrike
+*.exe
+smartpotato
+dist/
+build/
+
+# Go build artifacts
+*.test
+*.out
+*.prof
+
+# Vendor
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
