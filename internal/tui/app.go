@@ -19,6 +19,7 @@ const (
 	ViewCommands
 	ViewListeners
 	ViewImplants
+	ViewPKI
 )
 
 // Session mirrors the C2 session data for the TUI.
@@ -62,21 +63,32 @@ type ImplantConfig struct {
 	Jitter   int
 }
 
+// PKITemplateInfo describes an ADCS certificate template for TUI display.
+type PKITemplateInfo struct {
+	Name                    string
+	ESCVulns                []string
+	ESCScore                int
+	EnrolleeSuppliesSubject bool
+	AuthenticationEKU       bool
+	RequiresManagerApproval bool
+}
+
 // Model is the Bubbletea model for the operator console.
 type Model struct {
-	view           View
-	sessions       []Session
-	selectedIdx    int
+	view            View
+	sessions        []Session
+	selectedIdx     int
 	selectedSession string
-	commands       []CommandEntry
-	listeners      []ListenerInfo
-	implants       []ImplantConfig
-	cmdInput       textinput.Model
-	inputActive    bool
-	width          int
-	height         int
-	statusMsg      string
-	lastRefresh    time.Time
+	commands        []CommandEntry
+	listeners       []ListenerInfo
+	implants        []ImplantConfig
+	pkiTemplates    []PKITemplateInfo
+	cmdInput        textinput.Model
+	inputActive     bool
+	width           int
+	height          int
+	statusMsg       string
+	lastRefresh     time.Time
 }
 
 // NewModel creates a new TUI model with demo data.
@@ -167,6 +179,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "4":
 			m.view = ViewImplants
 			m.statusMsg = "Implants"
+	case "5":
+		m.view = ViewPKI
+		m.statusMsg = "PKI Templates"
 		case "j", "down":
 			m.moveSelection(1)
 		case "k", "up":
@@ -184,7 +199,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, textinput.Blink)
 			}
 		case "tab":
-			m.view = (m.view + 1) % 4
+		m.view = (m.view + 1) % 5
 		}
 	}
 
@@ -202,6 +217,8 @@ func (m *Model) moveSelection(delta int) {
 		max = len(m.listeners)
 	case ViewImplants:
 		max = len(m.implants)
+	case ViewPKI:
+		max = len(m.pkiTemplates)
 	}
 	if max == 0 {
 		return
@@ -266,11 +283,13 @@ func (m Model) View() string {
 		b.WriteString(m.renderListeners())
 	case ViewImplants:
 		b.WriteString(m.renderImplants())
+	case ViewPKI:
+		b.WriteString(m.renderPKI())
 	}
 
 	// Status bar
 	b.WriteString("\n")
-	status := fmt.Sprintf(" %s | %s | q:quit tab:switch 1-4:views",
+	status := fmt.Sprintf(" %s | %s | q:quit tab:switch 1-5:views",
 		statusStyle.Render(m.statusMsg),
 		dimStyle.Render(m.lastRefresh.Format("15:04:05")))
 	b.WriteString(status)
@@ -279,7 +298,7 @@ func (m Model) View() string {
 }
 
 func (m Model) renderTabs() string {
-	tabs := []string{"[1]Sessions", "[2]Commands", "[3]Listeners", "[4]Implants"}
+	tabs := []string{"[1]Sessions", "[2]Commands", "[3]Listeners", "[4]Implants", "[5]PKI"}
 	var parts []string
 	for i, t := range tabs {
 		if View(i) == m.view {
@@ -423,5 +442,54 @@ func (m Model) renderImplants() string {
 		}
 	}
 
+	return b.String()
+}
+
+func (m Model) renderPKI() string {
+	var b strings.Builder
+	b.WriteString(headerStyle.Render(fmt.Sprintf("PKI / ADCS Templates — %d templates", len(m.pkiTemplates))) + "\n\n")
+
+	if len(m.pkiTemplates) == 0 {
+		b.WriteString(dimStyle.Render("  No templates enumerated yet.\n"))
+		b.WriteString(dimStyle.Render("  Run: certstrike pki --enum --target-dc <dc> --domain <domain>\n"))
+		return b.String()
+	}
+
+	hdr := fmt.Sprintf("  %-30s %-20s %-8s %-8s %-8s %-10s",
+		"TEMPLATE", "ESC VULNS", "SCORE", "ESS", "AUTH", "APPROVAL")
+	b.WriteString(headerStyle.Render(hdr) + "\n")
+	b.WriteString(dimStyle.Render(strings.Repeat("─", 95)) + "\n")
+
+	for i, tmpl := range m.pkiTemplates {
+		vulns := "none"
+		if len(tmpl.ESCVulns) > 0 {
+			vulns = strings.Join(tmpl.ESCVulns, ",")
+		}
+		ess := "no"
+		if tmpl.EnrolleeSuppliesSubject {
+			ess = "YES"
+		}
+		auth := "no"
+		if tmpl.AuthenticationEKU {
+			auth = "YES"
+		}
+		approval := "no"
+		if tmpl.RequiresManagerApproval {
+			approval = "YES"
+		}
+		line := fmt.Sprintf("  %-30s %-20s %-8d %-8s %-8s %-10s",
+			tmpl.Name, vulns, tmpl.ESCScore, ess, auth, approval)
+		if i == m.selectedIdx {
+			b.WriteString(selectedStyle.Render(line) + "\n")
+		} else if tmpl.ESCScore >= 10 {
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FF4444")).Bold(true).Render(line) + "\n")
+		} else if tmpl.ESCScore > 0 {
+			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#FFAA00")).Render(line) + "\n")
+		} else {
+			b.WriteString(normalStyle.Render(line) + "\n")
+		}
+	}
+
+	b.WriteString("\n" + dimStyle.Render("  ESS=Enrollee Supplies Subject  AUTH=Authentication EKU"))
 	return b.String()
 }
