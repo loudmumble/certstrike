@@ -91,7 +91,7 @@ type Model struct {
 	lastRefresh     time.Time
 }
 
-// NewModel creates a new TUI model with demo data.
+// NewModel creates a new TUI model. Starts empty; populated by live C2 sessions.
 func NewModel() Model {
 	ti := textinput.New()
 	ti.Placeholder = "Enter command..."
@@ -101,12 +101,8 @@ func NewModel() Model {
 	return Model{
 		view:        ViewSessions,
 		sessions:    []Session{},
-		listeners: []ListenerInfo{
-			{BindAddress: "0.0.0.0", Port: 8443, Protocol: "https", Running: true, Sessions: 0},
-		},
-		implants: []ImplantConfig{
-			{ID: "smartpotato-001", Type: "SmartPotato", C2URL: "https://c2.example.com:8443", Interval: 5, Jitter: 20},
-		},
+		listeners:   []ListenerInfo{},
+		implants:    []ImplantConfig{},
 		cmdInput:    ti,
 		lastRefresh: time.Now(),
 		statusMsg:   "Ready",

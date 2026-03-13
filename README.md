@@ -6,7 +6,7 @@ Next-generation PKI, certificate, and mobile attack framework with integrated C2
 
 ### ADCS / PKI Exploitation
 - **Native LDAP enumeration** of certificate templates (no ldapsearch binary dependency)
-- **ESC1-ESC4 vulnerability detection** with automatic scoring and prioritization  
+- **ESC1-ESC4 vulnerability detection** with automatic scoring (ESC4 flags templates with security descriptors for manual SDDL/ACE review — does not parse ACEs)
 - **ESC1 exploitation**: forge certificates with arbitrary UPN via misconfigured templates
 - **ESC4 exploitation**: modify template ACLs → exploit as ESC1 → auto-restore
 - **Attack chain auto-detection**: scan all templates, score vulnerabilities, output prioritized attack paths
@@ -20,13 +20,13 @@ Next-generation PKI, certificate, and mobile attack framework with integrated C2
 
 ### Mobile Exploitation
 - **ClearBrite** forensic-grade logical device extraction via ADB
-- Zero-click exploit simulation (Pegasus, Predator, Chrysaor attack chains)
+- Zero-click exploit **simulation** for research (Pegasus, Predator, Chrysaor attack chain simulation — print-only, no real exploitation)
 
 ### MCP Server
 6 tools for agentic integration: `pki_enumerate`, `pki_forge`, `c2_list_sessions`, `c2_queue_command`, `c2_get_results`, `mobile_extract`
 
 ### Operator Console
-Bubbletea-based TUI with views: Sessions, Commands, Listeners, Implants
+Bubbletea-based TUI with views: Sessions, Commands, Listeners, Implants. Starts empty, populated by live C2 sessions.
 
 ### SmartPotato
 All-in-one Windows privilege escalation: JuicyPotato, RoguePotato, SweetPotato with auto-detection

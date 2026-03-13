@@ -21,7 +21,7 @@ CGO_ENABLED=0 go build ./...
 
 ### PKI / ADCS
 - **Native LDAP enumeration** — connects to DC LDAP port 389/636, no ldapsearch binary needed
-- **ESC1-ESC4 vulnerability scoring** — automatic detection and prioritization
+- **ESC1-ESC4 vulnerability scoring** — automatic detection and prioritization (ESC4 flags templates with security descriptors for manual SDDL/ACE review — does not parse ACEs)
 - **ESC1 exploitation** — forge certificates with arbitrary UPN via vulnerable templates
 - **ESC4 exploitation** — modify template ACLs then exploit as ESC1, auto-restore
 - **Attack chain auto-detection** — enumerate, score, generate prioritized attack paths
@@ -35,13 +35,13 @@ CGO_ENABLED=0 go build ./...
 
 ### Mobile
 - ClearBrite forensic extraction via ADB (device info, packages, network, filesystem, media)
-- Zero-click simulation (Pegasus, Predator, Chrysaor attack chains)
+- Zero-click **simulation** for research (Pegasus, Predator, Chrysaor attack chain simulation — print-only, no real exploitation)
 
 ### MCP Server
 Tools: `pki_enumerate`, `pki_forge`, `c2_list_sessions`, `c2_queue_command`, `c2_get_results`, `mobile_extract`
 
 ### Operator Console (TUI)
-Bubbletea-based console with views: Sessions, Commands, Listeners, Implants
+Bubbletea-based console with views: Sessions, Commands, Listeners, Implants. Starts empty, populated by live C2 sessions.
 
 ## Key Commands
 ```bash

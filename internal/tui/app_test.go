@@ -16,11 +16,11 @@ func TestNewModel(t *testing.T) {
 	if len(m.sessions) != 0 {
 		t.Errorf("expected 0 sessions, got %d", len(m.sessions))
 	}
-	if len(m.listeners) != 1 {
-		t.Errorf("expected 1 default listener, got %d", len(m.listeners))
+	if len(m.listeners) != 0 {
+		t.Errorf("expected 0 listeners (empty by default), got %d", len(m.listeners))
 	}
-	if len(m.implants) != 1 {
-		t.Errorf("expected 1 default implant, got %d", len(m.implants))
+	if len(m.implants) != 0 {
+		t.Errorf("expected 0 implants (empty by default), got %d", len(m.implants))
 	}
 	if m.statusMsg != "Ready" {
 		t.Errorf("expected status 'Ready', got %q", m.statusMsg)
@@ -198,12 +198,10 @@ func TestRenderCommands_WithData(t *testing.T) {
 
 func TestRenderListeners(t *testing.T) {
 	m := NewModel()
+	// Model starts empty; verify empty state message
 	output := m.renderListeners()
-	if !strings.Contains(output, "0.0.0.0") {
-		t.Error("expected default listener bind address")
-	}
-	if !strings.Contains(output, "https") {
-		t.Error("expected protocol in listener view")
+	if !strings.Contains(output, "No active listeners") {
+		t.Error("expected 'No active listeners' for empty default model")
 	}
 }
 
@@ -218,12 +216,10 @@ func TestRenderListeners_Empty(t *testing.T) {
 
 func TestRenderImplants(t *testing.T) {
 	m := NewModel()
+	// Model starts empty; verify empty state message
 	output := m.renderImplants()
-	if !strings.Contains(output, "SmartPotato") {
-		t.Error("expected implant type in view")
-	}
-	if !strings.Contains(output, "smartpotato-001") {
-		t.Error("expected implant ID in view")
+	if !strings.Contains(output, "No implant configurations") {
+		t.Error("expected 'No implant configurations' for empty default model")
 	}
 }
 
