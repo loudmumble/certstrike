@@ -28,8 +28,8 @@ Next-generation PKI, certificate, and mobile attack framework with integrated C2
 ### Operator Console
 Bubbletea-based TUI with views: Sessions, Commands, Listeners, Implants. Starts empty, populated by live C2 sessions.
 
-### SmartPotato
-All-in-one Windows privilege escalation: JuicyPotato, RoguePotato, SweetPotato with auto-detection
+### SmartPotato *(Educational / Skeleton)*
+Windows privilege escalation reference implementation documenting JuicyPotato, RoguePotato, SweetPotato attack chains. Currently outputs technique descriptions and COM flow diagrams — does not execute real privilege escalation. Requires Windows-specific syscall implementation (`golang.org/x/sys/windows`) to become operational.
 
 ## Quick Start
 

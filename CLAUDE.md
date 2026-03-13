@@ -10,7 +10,7 @@ CertStrike is a next-generation PKI, certificate, and mobile attack framework wi
 - `pkg/mobile/` — ADB-based mobile extraction (ClearBrite) and zero-click simulation
 - `internal/mcp/` — MCP stdio server (6 tools)
 - `internal/tui/` — Bubbletea operator console
-- `implants/smartpotato/` — Windows privilege escalation implant
+- `implants/smartpotato/` — Windows privilege escalation reference (educational skeleton — does not execute real attacks)
 
 ## Build
 ```bash
