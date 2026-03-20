@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"os"
 	"testing"
 )
 
@@ -136,5 +137,26 @@ func TestForgeCertificate_WithDifferentUPNs(t *testing.T) {
 				t.Errorf("Expected private key for UPN %s", upn)
 			}
 		})
+	}
+}
+
+func TestWritePFX(t *testing.T) {
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	cert, certKey, err := ForgeCertificate(caKey, "testuser@corp.local")
+	if err != nil {
+		t.Fatalf("ForgeCertificate: %v", err)
+	}
+
+	pfxPath := t.TempDir() + "/test.pfx"
+	if err := WritePFX(cert, certKey, pfxPath, "testpass"); err != nil {
+		t.Fatalf("WritePFX: %v", err)
+	}
+
+	data, err := os.ReadFile(pfxPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if len(data) < 32 {
+		t.Errorf("PFX file too small: %d bytes", len(data))
 	}
 }

@@ -154,8 +154,12 @@ func runForge(cmd *cobra.Command) error {
 	if err := pki.WriteCertKeyPEM(cert, certKey, basePath); err != nil {
 		return fmt.Errorf("write certificate: %w", err)
 	}
+	pfxPassword, _ := cmd.Flags().GetString("pfx-password")
+	if err := pki.WritePFX(cert, certKey, basePath+".pfx", pfxPassword); err != nil {
+		fmt.Printf("[!] PFX export failed: %v\n", err)
+	}
 
-	fmt.Printf("[+] Golden certificate written to %s.crt\n", basePath)
+	fmt.Printf("[+] Golden certificate written to %s.crt / %s.pfx\n", basePath, basePath)
 	fmt.Printf("    Subject: %s\n", cert.Subject.CommonName)
 	fmt.Printf("    UPN: %s\n", upn)
 	fmt.Printf("    Serial: %s\n", cert.SerialNumber.String())
@@ -200,17 +204,25 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		return fmt.Errorf("exploitation failed: %w", err)
 	}
 
+	pfxPassword, _ := cmd.Flags().GetString("pfx-password")
 	basePath := strings.TrimSuffix(output, ".pem")
 	basePath = strings.TrimSuffix(basePath, ".crt")
+
+	// Always write PEM files
 	if err := pki.WriteCertKeyPEM(cert, certKey, basePath); err != nil {
 		return fmt.Errorf("write cert: %w", err)
+	}
+	// Also write PFX for direct certipy/Rubeus use
+	pfxPath := basePath + ".pfx"
+	if err := pki.WritePFX(cert, certKey, pfxPath, pfxPassword); err != nil {
+		fmt.Printf("[!] PFX export failed: %v\n", err)
 	}
 
 	fmt.Printf("\n[+] Exploitation successful!\n")
 	fmt.Printf("    Exploit: %s\n", strings.ToUpper(exploit))
 	fmt.Printf("    Template: %s\n", templateName)
 	fmt.Printf("    UPN: %s\n", upn)
-	fmt.Printf("    Output: %s.crt / %s.key\n", basePath, basePath)
+	fmt.Printf("    Output: %s.crt / %s.key / %s.pfx\n", basePath, basePath, basePath)
 	return nil
 }
 
@@ -262,4 +274,5 @@ func init() {
 	pkiCmd.Flags().String("template", "", "Certificate template name for exploitation")
 	pkiCmd.Flags().StringP("output", "o", "", "Output file path")
 	pkiCmd.Flags().Bool("tls", false, "Use LDAPS (port 636) instead of LDAP (port 389)")
+	pkiCmd.Flags().String("pfx-password", "", "Password for PFX archive (default: empty/unencrypted)")
 }
