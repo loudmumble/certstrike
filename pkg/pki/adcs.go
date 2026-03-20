@@ -238,6 +238,33 @@ func scoreESC(tmpl *CertTemplate) {
 		tmpl.ESCScore += 6
 	}
 
+	// ESC5: Vulnerable PKI object ACLs — overly permissive on CA itself
+	// Indicated by security descriptor present + enrollment agent EKU (delegation chain)
+	for _, eku := range tmpl.EKUs {
+		if eku == "1.3.6.1.4.1.311.20.2.1" && len(tmpl.SecurityDescriptor) > 0 {
+			tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC5-CHECK")
+			tmpl.ESCScore += 5
+		}
+	}
+
+	// ESC7: CA officers have ManageCA + ManageCertificates rights
+	// Detectable when template is issued from a CA with dangerous built-in roles
+	// Flag templates where CA security descriptor indicates broad write access
+	if tmpl.RequiresManagerApproval && len(tmpl.SecurityDescriptor) > 0 {
+		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC7-CHECK")
+		tmpl.ESCScore += 4
+	}
+
+	// ESC8: NTLM relay to web enrollment endpoint
+	// HTTP enrollment (not HTTPS-only) allows NTLM relay attacks
+	// Check EnrollmentFlag for web enrollment without HTTPS enforcement
+	// 0x00000002 = CT_FLAG_AUTO_ENROLLMENT, 0x00000100 = CT_FLAG_PREVIOUS_APPROVAL_VALIDATE_REENROLLMENT
+	webEnrollableFlags := uint32(0x00000002) | uint32(0x00000100)
+	if tmpl.EnrollmentFlag&webEnrollableFlags != 0 && !tmpl.RequiresManagerApproval {
+		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC8-CHECK")
+		tmpl.ESCScore += 6
+	}
+
 	// ESC10: Weak certificate mapping — registry-based, flag only if template allows it
 	// Indicated by enrollee supplying subject AND no strong mapping enforced
 	if tmpl.EnrolleeSuppliesSubject && tmpl.CertificateNameFlag&0x00000008 == 0 {
@@ -254,8 +281,9 @@ func connectLDAP(cfg *ADCSConfig) (*ldap.Conn, error) {
 	var err error
 
 	if cfg.UseTLS {
+		fmt.Printf("[*] Connecting to LDAPS %s:636 (TLS, cert verification disabled)\n", cfg.TargetDC)
 		conn, err = ldap.DialTLS("tcp", fmt.Sprintf("%s:636", cfg.TargetDC), &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: true, //nolint:gosec // intentional: pen-test tool targeting internal AD
 		})
 	} else {
 		conn, err = ldap.DialURL(fmt.Sprintf("ldap://%s:389", cfg.TargetDC))
