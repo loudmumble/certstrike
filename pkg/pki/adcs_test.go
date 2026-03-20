@@ -89,11 +89,14 @@ func TestForgeCertificate(t *testing.T) {
 	}
 
 	upn := "admin@corp.local"
-	cert, err := ForgeCertificate(caKey, upn)
+	cert, certKey, err := ForgeCertificate(caKey, upn)
 	if err != nil {
 		t.Fatalf("ForgeCertificate failed: %v", err)
 	}
 
+	if certKey == nil {
+		t.Fatal("Expected private key, got nil")
+	}
 	if cert == nil {
 		t.Fatal("Expected certificate, got nil")
 	}
@@ -122,12 +125,15 @@ func TestForgeCertificate_WithDifferentUPNs(t *testing.T) {
 	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	for _, upn := range []string{"user@domain.local", "administrator@corp.internal", "svc@test.lab"} {
 		t.Run(upn, func(t *testing.T) {
-			cert, err := ForgeCertificate(caKey, upn)
+			cert, certKey, err := ForgeCertificate(caKey, upn)
 			if err != nil {
 				t.Errorf("ForgeCertificate failed for UPN %s: %v", upn, err)
 			}
 			if cert == nil {
 				t.Errorf("Expected certificate for UPN %s", upn)
+			}
+			if certKey == nil {
+				t.Errorf("Expected private key for UPN %s", upn)
 			}
 		})
 	}

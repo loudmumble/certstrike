@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/loudmumble/certstrike/pkg/c2"
 	"github.com/loudmumble/certstrike/pkg/mobile"
@@ -220,17 +221,20 @@ func (s *Server) runPKIForge(args map[string]interface{}) map[string]interface{}
 		return toolError(fmt.Sprintf("Generate CA key: %v", err))
 	}
 
-	cert, err := pki.ForgeCertificate(caKey, upn)
+	cert, certKey, err := pki.ForgeCertificate(caKey, upn)
 	if err != nil {
 		return toolError(fmt.Sprintf("Forge failed: %v", err))
 	}
 
-	if err := pki.WriteCertPEM(cert, output); err != nil {
+	basePath := strings.TrimSuffix(output, ".pem")
+	basePath = strings.TrimSuffix(basePath, ".crt")
+	if err := pki.WriteCertKeyPEM(cert, certKey, basePath); err != nil {
 		return toolError(fmt.Sprintf("Write cert: %v", err))
 	}
 
 	return toolResult(map[string]interface{}{
-		"status": "completed", "upn": upn, "output": output,
+		"status": "completed", "upn": upn, "output": basePath + ".crt",
+		"key_output": basePath + ".key",
 		"subject": cert.Subject.CommonName, "serial": cert.SerialNumber.String(),
 	})
 }

