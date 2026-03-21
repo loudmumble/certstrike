@@ -10,7 +10,7 @@ CertStrike is a next-generation PKI, certificate, and mobile attack framework wi
 - `pkg/mobile/` — ADB-based mobile extraction (ClearBrite) and zero-click simulation
 - `internal/mcp/` — MCP stdio server (6 tools)
 - `internal/tui/` — Bubbletea operator console
-- `implants/smartpotato/` — Windows privilege escalation reference (educational skeleton — does not execute real attacks)
+- `implants/smartpotato/` — Windows privilege escalation reference (educational skeleton — does not execute real attacks; requires golang.org/x/sys/windows syscall bindings to become operational)
 
 ## Build
 ```bash
@@ -36,6 +36,7 @@ CGO_ENABLED=0 go build ./...
 ### Mobile
 - ClearBrite forensic extraction via ADB (device info, packages, network, filesystem, media)
 - Zero-click **simulation** for research (Pegasus, Predator, Chrysaor attack chain simulation — print-only, no real exploitation)
+  - **RESEARCH ONLY**: `SimulateZeroClick()` does port scanning + prints technique stages. No payload delivery. Not operational.
 
 ### MCP Server
 Tools: `pki_enumerate`, `pki_forge`, `c2_list_sessions`, `c2_queue_command`, `c2_get_results`, `mobile_extract`

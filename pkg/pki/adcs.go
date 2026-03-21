@@ -184,6 +184,10 @@ func hasAuthenticationEKU(ekus []string) bool {
 }
 
 // scoreESC evaluates a template for ESC1-ESC4 vulnerabilities and assigns a risk score.
+// LIMITATION — ESC4/ESC4-CHECK: ACE/SDDL parsing is NOT performed. Any template with a
+// non-empty nTSecurityDescriptor is flagged ESC4-CHECK as a candidate for manual review.
+// Use Get-Acl (PowerShell) or certipy to confirm actual WriteDacl/WriteOwner rights before
+// attempting exploitation.
 func scoreESC(tmpl *CertTemplate) {
 	tmpl.ESCVulns = nil
 	tmpl.ESCScore = 0
