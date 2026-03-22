@@ -660,3 +660,79 @@ func buildBindDN(username, domain string) string {
 	}
 	return username + "@" + domain
 }
+
+// buildCABaseDN returns the LDAP base DN for the Certification Authorities container.
+func buildCABaseDN(domain string) string {
+	parts := strings.Split(domain, ".")
+	var dcParts []string
+	for _, p := range parts {
+		dcParts = append(dcParts, "DC="+p)
+	}
+	return "CN=Certification Authorities,CN=Public Key Services,CN=Services,CN=Configuration," + strings.Join(dcParts, ",")
+}
+
+// CAObject holds the LDAP attributes of a CA object in the PKI Services container.
+type CAObject struct {
+	Name               string
+	DN                 string
+	SecurityDescriptor []byte
+}
+
+// EnumerateCAs queries LDAP for CA objects under CN=Certification Authorities and
+// returns their names, DNs, and raw nTSecurityDescriptors for ESC5 analysis.
+func EnumerateCAs(cfg *ADCSConfig) ([]CAObject, error) {
+	conn, err := connectLDAP(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("LDAP connect: %w", err)
+	}
+	defer conn.Close()
+
+	baseDN := buildCABaseDN(cfg.Domain)
+	filter := "(objectClass=certificationAuthority)"
+	attrs := []string{"cn", "distinguishedName", "nTSecurityDescriptor"}
+
+	searchReq := ldap.NewSearchRequest(
+		baseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases,
+		0, 0, false, filter, attrs, nil,
+	)
+
+	result, err := conn.Search(searchReq)
+	if err != nil {
+		return nil, fmt.Errorf("LDAP search failed: %w", err)
+	}
+
+	var cas []CAObject
+	for _, entry := range result.Entries {
+		ca := CAObject{
+			Name:               entry.GetAttributeValue("cn"),
+			DN:                 entry.GetAttributeValue("distinguishedName"),
+			SecurityDescriptor: entry.GetRawAttributeValue("nTSecurityDescriptor"),
+		}
+		cas = append(cas, ca)
+	}
+	return cas, nil
+}
+
+// ScanESC5 enumerates CA objects and returns ESC5 findings — cases where
+// non-privileged trustees hold dangerous write access on the CA object itself.
+// ESC5 allows an attacker to gain control of the CA and issue arbitrary certificates.
+func ScanESC5(cfg *ADCSConfig) ([]ESC5Finding, error) {
+	cas, err := EnumerateCAs(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("enumerate CAs: %w", err)
+	}
+
+	var all []ESC5Finding
+	for _, ca := range cas {
+		findings, err := CheckESC5(ca.Name, ca.DN, ca.SecurityDescriptor)
+		if err != nil {
+			fmt.Printf("[!] ESC5 parse error for %s: %v\n", ca.Name, err)
+			continue
+		}
+		if len(findings) > 0 {
+			fmt.Printf("[!] ESC5 VULNERABLE: %s — %d dangerous ACE(s)\n", ca.Name, len(findings))
+		}
+		all = append(all, findings...)
+	}
+	return all, nil
+}

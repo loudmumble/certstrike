@@ -1,5 +1,5 @@
 # Binaries
-certstrike
+/certstrike
 *.exe
 smartpotato
 dist/

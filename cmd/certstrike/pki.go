@@ -94,6 +94,25 @@ func runEnumerate(cmd *cobra.Command) error {
 			fmt.Println("     ⚠  Manager Approval: NO")
 		}
 	}
+
+	// ESC5: CA object ACL inspection via nTSecurityDescriptor parsing
+	fmt.Println("\n[*] Scanning CA objects for ESC5 (dangerous ACLs on CA itself)...")
+	esc5Findings, err := pki.ScanESC5(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC5 scan failed: %v\n", err)
+	} else if len(esc5Findings) == 0 {
+		fmt.Println("[+] ESC5: No dangerous CA ACLs found.")
+	} else {
+		fmt.Printf("\n[!] ESC5 VULNERABLE — %d finding(s):\n\n", len(esc5Findings))
+		for _, f := range esc5Findings {
+			fmt.Printf("    CA:      %s\n", f.CAName)
+			fmt.Printf("    DN:      %s\n", f.CADN)
+			fmt.Printf("    Trustee: %s\n", f.Trustee)
+			fmt.Printf("    Rights:  %s  (mask=0x%08x)\n", strings.Join(f.Rights, ", "), f.AccessMask)
+			fmt.Println()
+		}
+	}
+
 	return nil
 }
 
