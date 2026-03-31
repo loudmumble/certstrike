@@ -6,7 +6,7 @@ Next-generation PKI, certificate, and mobile attack framework with integrated C2
 
 ### ADCS / PKI Exploitation
 - **Native LDAP enumeration** of certificate templates (no ldapsearch binary dependency)
-- **ESC1-ESC4 vulnerability detection** with automatic scoring (ESC4 flags templates with security descriptors for manual SDDL/ACE review — does not parse ACEs)
+- **ESC1-ESC4 vulnerability detection** with automatic scoring (ESC4 performs full ACE parsing to identify non-privileged trustees with dangerous write access)
 - **ESC1 exploitation**: forge certificates with arbitrary UPN via misconfigured templates
 - **ESC4 exploitation**: modify template ACLs → exploit as ESC1 → auto-restore
 - **Attack chain auto-detection**: scan all templates, score vulnerabilities, output prioritized attack paths
@@ -43,8 +43,8 @@ curl -k -X POST https://localhost:8443/register \
 # The Sessions tab in the console will populate once the implant checks in.
 ```
 
-### SmartPotato *(Educational / Skeleton)*
-Windows privilege escalation reference implementation documenting JuicyPotato, RoguePotato, SweetPotato attack chains. Currently outputs technique descriptions and COM flow diagrams — does not execute real privilege escalation. Requires Windows-specific syscall implementation (`golang.org/x/sys/windows`) to become operational.
+### SmartPotato *(Research Reference)*
+Windows privilege escalation reference documenting JuicyPotato, RoguePotato, SweetPotato attack chains. Outputs technique descriptions and COM flow diagrams. Does not execute real privilege escalation — requires Windows syscall bindings to become operational.
 
 ## Operational vs Research-Only Components
 
@@ -57,19 +57,19 @@ Windows privilege escalation reference implementation documenting JuicyPotato, R
 | ClearBrite ADB extraction | **Operational** | Requires `adb` in PATH and an authorized device |
 | MCP server (6 tools) | **Operational** | stdio JSON-RPC |
 | Operator console (TUI) | **Operational** | Requires live C2 sessions to show data; see below |
-| SmartPotato (Windows privesc) | **Research / Skeleton** | Prints technique flow only; no real exploitation — see below |
-| Zero-click simulation | **Research / Skeleton** | Prints attack chain descriptions only; no real exploitation — see below |
+| C2 polling agent | **Operational** | `certstrike agent --config stager.json` |
+| SmartPotato (Windows privesc) | **Research Reference** | Technique documentation for detection engineering — see below |
+| Zero-click simulation | **Research Reference** | Attack chain documentation only — see below |
 
-### SmartPotato — Research Reference Only
+### SmartPotato — Research Reference (Non-Operational)
 
 `implants/smartpotato/` documents JuicyPotato, RoguePotato, and SweetPotato Windows privilege
 escalation techniques. It **does not execute real privilege escalation**. On non-Windows platforms it
-prints the COM/RPC flow for educational purposes. On Windows it would require `golang.org/x/sys/windows`
-syscall bindings (VirtualAlloc, ImpersonateNamedPipeClient, CreateProcessWithTokenW, etc.) to become
-operational — those bindings are intentionally absent. Treat this as a technique reference, not a
-working tool.
+prints the COM/RPC flow for detection engineering purposes. The absence of Windows syscall bindings
+(`golang.org/x/sys/windows`) is a deliberate design decision, not a TODO — this is a technique
+reference for understanding and detecting potato-family attacks.
 
-### Zero-Click Simulation — Research Reference Only
+### Zero-Click Simulation — Research Reference (Non-Operational)
 
 `pkg/mobile.SimulateZeroClick()` (invoked via `certstrike mobile --simulate`) performs network port
 scanning via `nmap`/`nc` and **prints** the Pegasus, Predator, and Chrysaor attack chain stages. It
@@ -125,30 +125,11 @@ implants/smartpotato/ Windows privilege escalation
 
 ## Known Limitations
 
-### ESC4 — ACE / SDDL Parsing Is Manual Review Only
+### Zero-Click Simulation — Research Reference
 
-The ESC4 detection logic in `pkg/pki/adcs.go:scoreESC()` flags any template that has a non-empty
-`nTSecurityDescriptor` LDAP attribute as `ESC4-CHECK`. It does **not** parse the raw SDDL or
-decompose the Access Control Entries (ACEs) to verify that the current user actually holds
-WriteDacl or WriteOwner rights.
-
-Consequence: `ESC4-CHECK` results are **candidates for manual review**, not confirmed
-vulnerabilities. To confirm exploitability, inspect the security descriptor with:
-- `Get-Acl "AD:CN=<TemplateName>,CN=Certificate Templates,..."` (PowerShell)
-- `certipy find --vulnerable` (cross-references with current user's effective permissions)
-
-The ESC4 exploitation path (`--exploit esc4`) will fail at the LDAP Modify step if the
-authenticated user lacks the necessary ACE — it does not silently succeed on a false positive.
-
-### SmartPotato and Zero-Click Simulation — Not Operational
-
-See the [Operational vs Research-Only Components](#operational-vs-research-only-components) section above.
-
-### C2 Implant Polling — No Persistent Agent Binary
-
-The `c2 --implant-type cert-auth` command generates a stager configuration JSON, not a compiled
-implant binary. A Go agent that reads this configuration and implements the polling loop is not
-included.
+`pkg/mobile.SimulateZeroClick()` performs network port scanning and describes attack chain
+stages but does not deliver payloads. This is a demonstration tool for understanding mobile
+attack surfaces.
 
 ## Dependencies
 All pure Go, CGO_ENABLED=0 compatible:

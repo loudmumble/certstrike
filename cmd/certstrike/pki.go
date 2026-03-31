@@ -93,6 +93,9 @@ func runEnumerate(cmd *cobra.Command) error {
 		if !tmpl.RequiresManagerApproval {
 			fmt.Println("     ⚠  Manager Approval: NO")
 		}
+		for _, f := range tmpl.ESC4Findings {
+			fmt.Printf("     ⚠  ESC4: Trustee %s has %s (mask=0x%08x)\n", f.Trustee, strings.Join(f.Rights, ", "), f.AccessMask)
+		}
 	}
 
 	// ESC5: CA object ACL inspection via nTSecurityDescriptor parsing

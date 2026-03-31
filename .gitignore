@@ -1,7 +1,9 @@
 # Binaries
 /certstrike
 *.exe
-smartpotato
+/smartpotato
+implants/smartpotato/smartpotato
+implants/smartpotato/smartpotato.exe
 dist/
 build/
 

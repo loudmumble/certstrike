@@ -47,8 +47,9 @@ type CertTemplate struct {
 	RequiresManagerApproval bool    `json:"requires_manager_approval"`
 	AuthorizedSignatures   int      `json:"authorized_signatures"`
 	SecurityDescriptor     []byte   `json:"security_descriptor,omitempty"`
-	ESCVulns               []string `json:"esc_vulns,omitempty"`
-	ESCScore               int      `json:"esc_score"`
+	ESCVulns               []string      `json:"esc_vulns,omitempty"`
+	ESCScore               int           `json:"esc_score"`
+	ESC4Findings           []ESC4Finding `json:"esc4_findings,omitempty"`
 }
 
 // ESC flags and constants
@@ -184,13 +185,11 @@ func hasAuthenticationEKU(ekus []string) bool {
 }
 
 // scoreESC evaluates a template for ESC1-ESC4 vulnerabilities and assigns a risk score.
-// LIMITATION — ESC4/ESC4-CHECK: ACE/SDDL parsing is NOT performed. Any template with a
-// non-empty nTSecurityDescriptor is flagged ESC4-CHECK as a candidate for manual review.
-// Use Get-Acl (PowerShell) or certipy to confirm actual WriteDacl/WriteOwner rights before
-// attempting exploitation.
+// ESC4 performs full ACE parsing to identify non-privileged trustees with dangerous write access.
 func scoreESC(tmpl *CertTemplate) {
 	tmpl.ESCVulns = nil
 	tmpl.ESCScore = 0
+	tmpl.ESC4Findings = nil
 
 	// ESC1: Enrollee supplies subject + authentication EKU + no manager approval + no signatures
 	if tmpl.EnrolleeSuppliesSubject && tmpl.AuthenticationEKU &&
@@ -219,13 +218,18 @@ func scoreESC(tmpl *CertTemplate) {
 		}
 	}
 
-	// ESC4: WriteDacl/WriteOwner on template (checked via security descriptor)
-	// NOTE: Flags templates with non-empty security descriptors for manual SDDL/ACE review.
-	// Does NOT parse SDDL ACEs — any template with a security descriptor is flagged.
-	// Manual verification required to confirm actual WriteDacl/WriteOwner permissions.
+	// ESC4: WriteDacl/WriteOwner on template — full ACE parsing
 	if len(tmpl.SecurityDescriptor) > 0 {
-		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC4-CHECK")
-		tmpl.ESCScore += 1
+		findings, err := CheckESC4(tmpl.Name, tmpl.DN, tmpl.SecurityDescriptor)
+		if err == nil && len(findings) > 0 {
+			tmpl.ESC4Findings = findings
+			tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC4-EXPLOITABLE")
+			tmpl.ESCScore += 6
+		} else if len(tmpl.SecurityDescriptor) > 0 {
+			// SD present but no dangerous findings or parse error — flag for manual review
+			tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC4-CHECK")
+			tmpl.ESCScore += 1
+		}
 	}
 
 	// ESC6: EDITF_ATTRIBUTESUBJECTALTNAME2 flag on CA

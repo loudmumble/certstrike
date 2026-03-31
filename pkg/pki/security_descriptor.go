@@ -285,6 +285,62 @@ func isDangerousTrustee(sidStr string) bool {
 	return false
 }
 
+// ESC4Finding represents a dangerous ACE found on a certificate template object.
+type ESC4Finding struct {
+	TemplateDN   string
+	TemplateName string
+	Trustee      string // SID string
+	AccessMask   uint32
+	Rights       []string // human-readable right names
+}
+
+// CheckESC4 parses the nTSecurityDescriptor of a certificate template and returns
+// ESC4 findings where non-privileged trustees have dangerous write access (WriteDACL,
+// WriteOwner, GenericAll, GenericWrite) that would allow template modification.
+func CheckESC4(templateName, templateDN string, rawSD []byte) ([]ESC4Finding, error) {
+	if len(rawSD) == 0 {
+		return nil, nil
+	}
+
+	sd, err := ParseSecurityDescriptor(rawSD)
+	if err != nil {
+		return nil, fmt.Errorf("parse SD for template %s: %w", templateName, err)
+	}
+
+	if sd.DACL == nil {
+		return nil, nil
+	}
+
+	var findings []ESC4Finding
+	for _, ace := range sd.DACL.ACEs {
+		if ace.Type != aceTypeAccessAllowed {
+			continue
+		}
+		if ace.Mask&dangerousCAMask == 0 {
+			continue
+		}
+		if ace.SIDText == "" {
+			continue
+		}
+		if isPrivilegedSID(ace.SIDText) {
+			continue
+		}
+		rights := DangerousRights(ace.Mask)
+		if len(rights) == 0 {
+			continue
+		}
+		findings = append(findings, ESC4Finding{
+			TemplateDN:   templateDN,
+			TemplateName: templateName,
+			Trustee:      ace.SIDText,
+			AccessMask:   ace.Mask,
+			Rights:       rights,
+		})
+	}
+
+	return findings, nil
+}
+
 // CheckESC5 parses the nTSecurityDescriptor of a CA LDAP object and returns
 // ESC5 findings where non-privileged trustees have dangerous write access.
 func CheckESC5(caName, caDN string, rawSD []byte) ([]ESC5Finding, error) {

@@ -222,6 +222,84 @@ func TestDangerousRights_WriteDACLOnly(t *testing.T) {
 	}
 }
 
+// ── CheckESC4 ─────────────────────────────────────────────────────────────────
+
+func TestCheckESC4_EmptySD(t *testing.T) {
+	findings, err := CheckESC4("TestTemplate", "CN=TestTemplate,CN=Templates", nil)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("expected no findings for empty SD, got %d", len(findings))
+	}
+}
+
+func TestCheckESC4_PrivilegedTrusteeNotFlagged(t *testing.T) {
+	adminSID := []byte{1, 2, 0, 0, 0, 0, 0, 5, 32, 0, 0, 0, 32, 2, 0, 0} // S-1-5-32-544
+	aces := []testACE{
+		{aceTypeAccessAllowed, accessGenericAll, adminSID},
+	}
+	data := buildMinimalSD(aces)
+	findings, err := CheckESC4("TestTemplate", "CN=TestTemplate", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("privileged trustee should not be flagged, got findings: %+v", findings)
+	}
+}
+
+func TestCheckESC4_EveryoneWithWriteDACL(t *testing.T) {
+	everyoneSID := []byte{1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0} // S-1-1-0
+	aces := []testACE{
+		{aceTypeAccessAllowed, accessWriteDACL, everyoneSID},
+	}
+	data := buildMinimalSD(aces)
+	findings, err := CheckESC4("VulnTemplate", "CN=VulnTemplate", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 ESC4 finding, got %d", len(findings))
+	}
+	if findings[0].TemplateName != "VulnTemplate" {
+		t.Errorf("wrong TemplateName: %s", findings[0].TemplateName)
+	}
+	if findings[0].Rights[0] != "WriteDACL" {
+		t.Errorf("expected WriteDACL, got %v", findings[0].Rights)
+	}
+}
+
+func TestCheckESC4_DeniedACENotFlagged(t *testing.T) {
+	everyoneSID := []byte{1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0}
+	aces := []testACE{
+		{aceTypeAccessDenied, accessWriteDACL, everyoneSID},
+	}
+	data := buildMinimalSD(aces)
+	findings, err := CheckESC4("TestTemplate", "CN=TestTemplate", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("ACCESS_DENIED ACE should not be flagged, got %d findings", len(findings))
+	}
+}
+
+func TestCheckESC4_ReadOnlyNotFlagged(t *testing.T) {
+	everyoneSID := []byte{1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0}
+	aces := []testACE{
+		{aceTypeAccessAllowed, accessReadControl, everyoneSID},
+	}
+	data := buildMinimalSD(aces)
+	findings, err := CheckESC4("SafeTemplate", "CN=SafeTemplate", data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Errorf("read-only ACE should not be flagged, got %d findings", len(findings))
+	}
+}
+
 // ── CheckESC5 ─────────────────────────────────────────────────────────────────
 
 func TestCheckESC5_EmptySD(t *testing.T) {
