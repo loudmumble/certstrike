@@ -47,6 +47,7 @@ type CertTemplate struct {
 	RequiresManagerApproval bool    `json:"requires_manager_approval"`
 	AuthorizedSignatures   int      `json:"authorized_signatures"`
 	SecurityDescriptor     []byte   `json:"security_descriptor,omitempty"`
+	IssuancePolicyOIDs     []string      `json:"issuance_policy_oids,omitempty"`
 	ESCVulns               []string      `json:"esc_vulns,omitempty"`
 	ESCScore               int           `json:"esc_score"`
 	ESC4Findings           []ESC4Finding `json:"esc4_findings,omitempty"`
@@ -101,6 +102,7 @@ func EnumerateTemplates(cfg *ADCSConfig) ([]CertTemplate, error) {
 		"msPKI-Enrollment-Flag",
 		"msPKI-RA-Signature",
 		"pKIExtendedKeyUsage",
+		"msPKI-Certificate-Application-Policy",
 		"revision",
 		"msPKI-Template-Schema-Version",
 		"nTSecurityDescriptor",
@@ -154,6 +156,7 @@ func EnumerateTemplates(cfg *ADCSConfig) ([]CertTemplate, error) {
 			fmt.Sscanf(vs, "%d", &tmpl.SchemaVersion)
 		}
 
+		tmpl.IssuancePolicyOIDs = entry.GetAttributeValues("msPKI-Certificate-Application-Policy")
 		tmpl.SecurityDescriptor = entry.GetRawAttributeValue("nTSecurityDescriptor")
 
 		// Evaluate security properties
@@ -240,8 +243,8 @@ func scoreESC(tmpl *CertTemplate) {
 	}
 
 	// ESC9: CT_FLAG_NO_SECURITY_EXTENSION — no szOID_NTDS_CA_SECURITY_EXT extension
-	// msPKI-Enrollment-Flag & 0x00080000
-	if tmpl.EnrollmentFlag&0x00080000 != 0 {
+	// msPKI-Enrollment-Flag & 0x00080000 + authentication EKU required
+	if tmpl.EnrollmentFlag&ctFlagNoSecurityExtension != 0 && tmpl.AuthenticationEKU {
 		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC9")
 		tmpl.ESCScore += 6
 	}
@@ -263,24 +266,9 @@ func scoreESC(tmpl *CertTemplate) {
 		tmpl.ESCScore += 4
 	}
 
-	// ESC8: NTLM relay to web enrollment endpoint
-	// HTTP enrollment (not HTTPS-only) allows NTLM relay attacks
-	// Check EnrollmentFlag for web enrollment without HTTPS enforcement
-	// 0x00000002 = CT_FLAG_AUTO_ENROLLMENT, 0x00000100 = CT_FLAG_PREVIOUS_APPROVAL_VALIDATE_REENROLLMENT
-	webEnrollableFlags := uint32(0x00000002) | uint32(0x00000100)
-	if tmpl.EnrollmentFlag&webEnrollableFlags != 0 && !tmpl.RequiresManagerApproval {
-		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC8-CHECK")
-		tmpl.ESCScore += 6
-	}
-
-	// ESC10: Weak certificate mapping — registry-based, flag only if template allows it
-	// Indicated by enrollee supplying subject AND no strong mapping enforced
-	if tmpl.EnrolleeSuppliesSubject && tmpl.CertificateNameFlag&0x00000008 == 0 {
-		if tmpl.ESCScore > 0 { // Only flag if already vulnerable
-			tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC10-CHECK")
-			tmpl.ESCScore += 2
-		}
-	}
+	// ESC8: CA-level — NTLM relay to web enrollment. Detected by ScanESC8(), not template flags.
+	// ESC10: Registry-based weak certificate mapping. Will be implemented properly later.
+	// ESC11: CA-level — NTLM relay to RPC interface. Detected by ScanESC11(), not template flags.
 }
 
 // connectLDAP establishes a connection to the DC's LDAP service.

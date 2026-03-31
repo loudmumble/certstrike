@@ -1,6 +1,6 @@
 # CertStrike
 
-Next-generation PKI, certificate, and mobile attack framework with integrated C2 capabilities.
+ADCS exploitation and PKI attack framework with integrated cert-auth C2.
 
 ## Features
 
@@ -18,12 +18,8 @@ Next-generation PKI, certificate, and mobile attack framework with integrated C2
 - **Certificate persistence**: cert-auth implants authenticate via forged certificates (Schannel mTLS)
 - Stager configuration generation
 
-### Mobile Exploitation
-- **ClearBrite** forensic-grade logical device extraction via ADB
-- Zero-click exploit **simulation** for research (Pegasus, Predator, Chrysaor attack chain simulation — print-only, no real exploitation)
-
 ### MCP Server
-6 tools for agentic integration: `pki_enumerate`, `pki_forge`, `c2_list_sessions`, `c2_queue_command`, `c2_get_results`, `mobile_extract`
+5 tools for agentic integration: `pki_enumerate`, `pki_forge`, `c2_list_sessions`, `c2_queue_command`, `c2_get_results`
 
 ### Operator Console
 Bubbletea-based TUI with views: Sessions, Commands, Listeners, Implants. Starts empty, populated by live C2 sessions.
@@ -54,7 +50,6 @@ Windows privilege escalation reference documenting JuicyPotato, RoguePotato, Swe
 | ESC1/ESC4 exploitation | **Operational** | Live LDAP writes; requires WriteDacl for ESC4 |
 | Certificate forging | **Operational** | Pure Go, CGO_ENABLED=0 |
 | C2 listener + session management | **Operational** | HTTP/HTTPS, cert-auth implants |
-| ClearBrite ADB extraction | **Operational** | Requires `adb` in PATH and an authorized device |
 | MCP server (6 tools) | **Operational** | stdio JSON-RPC |
 | Operator console (TUI) | **Operational** | Requires live C2 sessions to show data; see below |
 | C2 polling agent | **Operational** | `certstrike agent --config stager.json` |
@@ -68,13 +63,6 @@ escalation techniques. It **does not execute real privilege escalation**. On non
 prints the COM/RPC flow for detection engineering purposes. The absence of Windows syscall bindings
 (`golang.org/x/sys/windows`) is a deliberate design decision, not a TODO — this is a technique
 reference for understanding and detecting potato-family attacks.
-
-### Zero-Click Simulation — Research Reference (Non-Operational)
-
-`pkg/mobile.SimulateZeroClick()` (invoked via `certstrike mobile --simulate`) performs network port
-scanning via `nmap`/`nc` and **prints** the Pegasus, Predator, and Chrysaor attack chain stages. It
-does **not** deliver any payload or exploit any vulnerability. The simulation terminates with an
-explicit disclaimer message. It is provided for research awareness and training purposes only.
 
 ## Quick Start
 
@@ -107,8 +95,8 @@ CGO_ENABLED=0 go build -o certstrike ./cmd/certstrike
 # Start MCP server
 ./certstrike mcp
 
-# Mobile extraction
-./certstrike mobile --extract --device-id emulator-5554 --output-dir ./extraction
+# Run C2 polling agent
+./certstrike agent --config stager.json
 ```
 
 ## Architecture
@@ -117,19 +105,10 @@ CGO_ENABLED=0 go build -o certstrike ./cmd/certstrike
 cmd/certstrike/     CLI entry points (cobra)
 pkg/pki/            ADCS enumeration, ESC exploitation, certificate forging
 pkg/c2/             C2 listener, session management, cert-auth implants
-pkg/mobile/         ADB extraction (ClearBrite), zero-click simulation
-internal/mcp/       MCP stdio server (6 tools)
+internal/mcp/       MCP stdio server (5 tools)
 internal/tui/       Bubbletea operator console
 implants/smartpotato/ Windows privilege escalation
 ```
-
-## Known Limitations
-
-### Zero-Click Simulation — Research Reference
-
-`pkg/mobile.SimulateZeroClick()` performs network port scanning and describes attack chain
-stages but does not deliver payloads. This is a demonstration tool for understanding mobile
-attack surfaces.
 
 ## Dependencies
 All pure Go, CGO_ENABLED=0 compatible:

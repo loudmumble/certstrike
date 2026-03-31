@@ -19,8 +19,8 @@ func TestNewServer(t *testing.T) {
 
 func TestToolList(t *testing.T) {
 	tools := toolList()
-	if len(tools) != 6 {
-		t.Errorf("expected 6 tools, got %d", len(tools))
+	if len(tools) != 5 {
+		t.Errorf("expected 5 tools, got %d", len(tools))
 	}
 
 	expectedTools := map[string]bool{
@@ -29,7 +29,6 @@ func TestToolList(t *testing.T) {
 		"c2_list_sessions": false,
 		"c2_queue_command": false,
 		"c2_get_results":   false,
-		"mobile_extract":   false,
 	}
 
 	for _, tool := range tools {
@@ -184,8 +183,8 @@ func TestServe_ToolsList(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tools array")
 	}
-	if len(tools) != 6 {
-		t.Errorf("expected 6 tools, got %d", len(tools))
+	if len(tools) != 5 {
+		t.Errorf("expected 5 tools, got %d", len(tools))
 	}
 }
 
@@ -255,10 +254,3 @@ func TestCallTool_C2GetResults_NoListener(t *testing.T) {
 	}
 }
 
-func TestCallTool_MobileExtract_MissingDeviceID(t *testing.T) {
-	s := NewServer(nil)
-	result := s.callTool("mobile_extract", map[string]interface{}{})
-	if result["isError"] != true {
-		t.Error("expected error when device_id missing")
-	}
-}

@@ -1,5 +1,5 @@
 // Package mcp provides an MCP stdio server for CertStrike.
-// Tools: pki_enumerate, pki_forge, c2_list_sessions, c2_queue_command, c2_get_results, mobile_extract.
+// Tools: pki_enumerate, pki_forge, c2_list_sessions, c2_queue_command, c2_get_results.
 package mcp
 
 import (
@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/loudmumble/certstrike/pkg/c2"
-	"github.com/loudmumble/certstrike/pkg/mobile"
 	"github.com/loudmumble/certstrike/pkg/pki"
 )
 
@@ -145,18 +144,6 @@ func toolList() []map[string]interface{} {
 				},
 			},
 		},
-		{
-			"name":        "mobile_extract",
-			"description": "Run ClearBrite forensic extraction on a connected ADB device.",
-			"inputSchema": map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"device_id":  map[string]interface{}{"type": "string", "description": "ADB device ID."},
-					"output_dir": map[string]interface{}{"type": "string", "description": "Output directory."},
-				},
-				"required": []string{"device_id"},
-			},
-		},
 	}
 }
 
@@ -172,8 +159,6 @@ func (s *Server) callTool(name string, args map[string]interface{}) map[string]i
 		return s.runC2QueueCommand(args)
 	case "c2_get_results":
 		return s.runC2GetResults(args)
-	case "mobile_extract":
-		return s.runMobileExtract(args)
 	default:
 		return toolError(fmt.Sprintf("Unknown tool: %s", name))
 	}
@@ -282,24 +267,6 @@ func (s *Server) runC2GetResults(args map[string]interface{}) map[string]interfa
 	sessionID, _ := args["session_id"].(string)
 	results := s.listener.GetResults(sessionID)
 	return toolResult(map[string]interface{}{"status": "completed", "results": results, "count": len(results)})
-}
-
-func (s *Server) runMobileExtract(args map[string]interface{}) map[string]interface{} {
-	deviceID, _ := args["device_id"].(string)
-	outputDir, _ := args["output_dir"].(string)
-	if deviceID == "" {
-		return toolError("device_id is required")
-	}
-	if outputDir == "" {
-		outputDir = "./extraction"
-	}
-
-	if err := mobile.ClearBriteDump(deviceID, outputDir); err != nil {
-		return toolError(fmt.Sprintf("Extraction failed: %v", err))
-	}
-	return toolResult(map[string]interface{}{
-		"status": "completed", "device_id": deviceID, "output_dir": outputDir,
-	})
 }
 
 func toolResult(data map[string]interface{}) map[string]interface{} {
