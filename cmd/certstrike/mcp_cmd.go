@@ -17,8 +17,7 @@ Tools available:
   pki_forge        — Forge golden certificates
   c2_list_sessions — List active C2 sessions
   c2_queue_command — Queue command for session
-  c2_get_results   — Get command results
-  mobile_extract   — Run ClearBrite extraction`,
+  c2_get_results   — Get command results`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := mcp.ServeStdio(nil); err != nil {
 			return fmt.Errorf("MCP server error: %w", err)
