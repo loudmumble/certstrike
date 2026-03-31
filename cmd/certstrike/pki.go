@@ -36,7 +36,9 @@ Examples:
   certstrike pki --auto-detect --target-dc dc01.corp.local --domain corp.local
   certstrike pki --import-pfx cert.pfx --pfx-password pass
   certstrike pki --import-pfx cert.pfx --json
-  certstrike pki --report --format markdown --output findings.md --target-dc dc01.corp.local --domain corp.local --username user --password pass`,
+  certstrike pki --report --format markdown --output findings.md --target-dc dc01.corp.local --domain corp.local --username user --password pass
+  certstrike pki --cert-theft all
+  certstrike pki --cert-theft theft4`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		doEnum, _ := cmd.Flags().GetBool("enum")
 		doForge, _ := cmd.Flags().GetBool("forge")
@@ -44,11 +46,16 @@ Examples:
 		doAutoDetect, _ := cmd.Flags().GetBool("auto-detect")
 		importPFX, _ := cmd.Flags().GetString("import-pfx")
 		doReport, _ := cmd.Flags().GetBool("report")
+		certTheft, _ := cmd.Flags().GetString("cert-theft")
 
-		if !doEnum && !doForge && exploit == "" && !doAutoDetect && importPFX == "" && !doReport {
+		if !doEnum && !doForge && exploit == "" && !doAutoDetect && importPFX == "" && !doReport && certTheft == "" {
 			return cmd.Help()
 		}
 
+		if certTheft != "" {
+			pki.PrintCertTheftPlaybook(certTheft)
+			return nil
+		}
 		if importPFX != "" {
 			return runImportPFX(cmd, importPFX)
 		}
@@ -616,6 +623,7 @@ func init() {
 	pkiCmd.Flags().Bool("auto-detect", false, "Auto-detect ESC vulnerabilities and prioritize attack paths")
 	pkiCmd.Flags().String("import-pfx", "", "Import and display info from a PKCS12/PFX file")
 	pkiCmd.Flags().Bool("report", false, "Generate engagement report from full ADCS enumeration")
+	pkiCmd.Flags().String("cert-theft", "", "Display certificate theft playbook (theft1, theft2, theft3, theft4, theft5, all)")
 
 	// Connection flags
 	pkiCmd.Flags().String("target-dc", "", "Target domain controller hostname")
