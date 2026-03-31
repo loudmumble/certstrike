@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"encoding/binary"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -224,6 +225,71 @@ func ScanESC8(cfg *ADCSConfig) ([]ESC8Finding, error) {
 	}
 
 	return findings, nil
+}
+
+// ESC12Finding represents a CA whose DCOM interface (ICertRequest) is remotely accessible,
+// enabling abuse when the CA's private key is stored on a network HSM or when DCOM-based
+// enrollment lacks proper access controls.
+type ESC12Finding struct {
+	CAName         string `json:"ca_name"`
+	CAHostname     string `json:"ca_hostname"`
+	DCOMAccessible bool   `json:"dcom_accessible"`
+	Flags          uint32 `json:"flags"`
+}
+
+// ScanESC12 enumerates enrollment services and probes each CA for an accessible DCOM
+// endpoint mapper (TCP port 135). When the DCOM endpoint is reachable, an attacker can
+// invoke the ICertRequest DCOM interface to request certificates remotely — particularly
+// dangerous when the CA's private key is stored on a network HSM, as the DCOM interface
+// bypasses normal enrollment restrictions.
+func ScanESC12(cfg *ADCSConfig) ([]ESC12Finding, error) {
+	fmt.Println("[*] Scanning for ESC12 (DCOM interface abuse on CA / network HSM key storage)...")
+
+	services, err := EnumerateEnrollmentServices(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("enumerate enrollment services: %w", err)
+	}
+
+	var findings []ESC12Finding
+	for _, svc := range services {
+		if svc.DNSHostName == "" {
+			fmt.Printf("[!] Enrollment service %q has no dNSHostName, skipping DCOM probe\n", svc.Name)
+			continue
+		}
+
+		stealthDelay(cfg)
+		fmt.Printf("[*] Probing DCOM endpoint mapper on %s (%s:135)...\n", svc.Name, svc.DNSHostName)
+
+		dcomAccessible := probeDCOMEndpoint(svc.DNSHostName)
+
+		if dcomAccessible {
+			finding := ESC12Finding{
+				CAName:         svc.Name,
+				CAHostname:     svc.DNSHostName,
+				DCOMAccessible: true,
+				Flags:          svc.Flags,
+			}
+			fmt.Printf("[!] ESC12 VULNERABLE: %s — DCOM endpoint mapper reachable on %s:135 (flags=0x%08x)\n",
+				svc.Name, svc.DNSHostName, svc.Flags)
+			findings = append(findings, finding)
+		} else {
+			fmt.Printf("[+] ESC12 SAFE: %s — DCOM endpoint mapper not reachable on %s:135\n",
+				svc.Name, svc.DNSHostName)
+		}
+	}
+
+	return findings, nil
+}
+
+// probeDCOMEndpoint attempts a TCP connection to port 135 (DCOM endpoint mapper) on the
+// given hostname. Returns true if the port is reachable within the timeout.
+func probeDCOMEndpoint(hostname string) bool {
+	conn, err := net.DialTimeout("tcp", hostname+":135", 5*time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 // ScanESC11 enumerates enrollment services and checks the CA flags attribute for the
