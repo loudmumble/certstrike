@@ -203,6 +203,7 @@ func ScanESC8(cfg *ADCSConfig) ([]ESC8Finding, error) {
 			continue
 		}
 
+		stealthDelay(cfg)
 		fmt.Printf("[*] Probing web enrollment on %s (%s)...\n", svc.Name, svc.DNSHostName)
 		finding, err := ProbeWebEnrollment(svc.DNSHostName)
 		if err != nil {
