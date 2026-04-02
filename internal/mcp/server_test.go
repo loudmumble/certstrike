@@ -3,8 +3,10 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewServer(t *testing.T) {
@@ -126,20 +128,28 @@ func TestServe_Initialize(t *testing.T) {
 	s := NewServer(nil)
 
 	request := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n"
-	var buf bytes.Buffer
+	pr, pw := io.Pipe()
 
 	go func() {
-		s.Serve(strings.NewReader(request), &buf)
+		s.Serve(strings.NewReader(request), pw)
+		pw.Close()
 	}()
 
-	// Give it a moment to process
-	for i := 0; i < 100; i++ {
-		if buf.Len() > 0 {
-			break
-		}
+	// Read the response with a timeout
+	done := make(chan []byte, 1)
+	go func() {
+		data, _ := io.ReadAll(pr)
+		done <- data
+	}()
+
+	var outputBytes []byte
+	select {
+	case outputBytes = <-done:
+	case <-time.After(2 * time.Second):
+		t.Skip("server did not produce output in time")
 	}
 
-	output := buf.String()
+	output := string(outputBytes)
 	if output == "" {
 		t.Skip("server did not produce output in time")
 	}
