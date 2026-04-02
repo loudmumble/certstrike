@@ -1,11 +1,13 @@
 #!/bin/bash
 set -e
 
+echo "[*] Removing old binary..."
+sudo rm -f /usr/local/bin/certstrike
+
 echo "[*] Building CertStrike..."
 CGO_ENABLED=0 go build -o certstrike ./cmd/certstrike
 echo "[+] Built: ./certstrike"
 
-if [ "$1" = "--install" ]; then
-    sudo cp certstrike /usr/local/bin/certstrike
-    echo "[+] Installed to /usr/local/bin/certstrike"
-fi
+echo "[*] Installing..."
+sudo cp certstrike /usr/local/bin/
+echo "[+] Installed to /usr/local/bin/certstrike"
