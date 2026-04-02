@@ -454,6 +454,9 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	if upn == "" {
 		return fmt.Errorf("--upn is required for exploitation")
 	}
+	if !strings.Contains(upn, "@") {
+		return fmt.Errorf("--upn must be a full UPN (user@domain), got %q", upn)
+	}
 	if output == "" {
 		output = "exploited-cert.pem"
 	}

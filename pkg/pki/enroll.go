@@ -251,8 +251,14 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 		// Try to extract ReqID from the response
 		reqID := extractReqID(bodyStr)
 		if reqID == "" {
-			lastErr = fmt.Errorf("could not parse ReqID from certsrv response")
+			// Debug: show a snippet of the response to help diagnose
+			snippet := bodyStr
+			if len(snippet) > 500 {
+				snippet = snippet[:500]
+			}
 			fmt.Printf("[!] Could not find certificate request ID in response\n")
+			fmt.Printf("[DEBUG] Response (%d bytes, HTTP %d):\n%s\n", len(body), resp.StatusCode, snippet)
+			lastErr = fmt.Errorf("could not parse ReqID from certsrv response")
 			continue
 		}
 
@@ -274,17 +280,25 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 	return nil, fmt.Errorf("web enrollment failed on all schemes: %w", lastErr)
 }
 
-// reReqID matches the certificate download link in certsrv HTML responses.
-var reReqID = regexp.MustCompile(`certnew\.cer\?ReqID=(\d+)`)
-
-// reReqIDJS matches the locDownloadCert1 JavaScript variable assignment.
-var reReqIDJS = regexp.MustCompile(`locDownloadCert1\s*=\s*"[^"]*ReqID=(\d+)`)
-
-// reErrorMsg matches common certsrv error patterns in response HTML.
-var reErrorMsg = regexp.MustCompile(`<B>\s*Error[^<]*</B>[^<]*<P>\s*([^<]+)`)
-
-// reDenied matches the "denied" disposition in certsrv responses.
-var reDenied = regexp.MustCompile(`(?i)The disposition message is "([^"]*denied[^"]*)"`)
+// Regex patterns for certsrv response parsing. Multiple patterns cover
+// different Windows Server versions and language packs.
+var (
+	// Certificate download link in HTML
+	reReqID = regexp.MustCompile(`certnew\.cer\?ReqID=(\d+)`)
+	// JavaScript variable assignment
+	reReqIDJS = regexp.MustCompile(`locDownloadCert1\s*=\s*"[^"]*ReqID=(\d+)`)
+	// "Your certificate has been issued" with ReqID in form
+	reReqIDIssued = regexp.MustCompile(`(?i)certificate has been issued.*?ReqID=(\d+)`)
+	// ReqID in any context
+	reReqIDGeneric = regexp.MustCompile(`ReqID=(\d+)`)
+	// "Request Id:" text (some certsrv versions show this)
+	reReqIDText = regexp.MustCompile(`(?i)request\s+id[:\s]+(\d+)`)
+	// Error messages
+	reErrorMsg = regexp.MustCompile(`<B>\s*Error[^<]*</B>[^<]*<P>\s*([^<]+)`)
+	reDenied   = regexp.MustCompile(`(?i)The disposition message is "([^"]*denied[^"]*)"`)
+	rePending  = regexp.MustCompile(`(?i)certificate is pending`)
+	reNotAuth  = regexp.MustCompile(`(?i)access.denied|not.authorized|unauthorized`)
+)
 
 // extractReqID parses the request ID from a certsrv HTML response.
 func extractReqID(body string) string {
@@ -294,6 +308,15 @@ func extractReqID(body string) string {
 	if m := reReqIDJS.FindStringSubmatch(body); len(m) > 1 {
 		return m[1]
 	}
+	if m := reReqIDIssued.FindStringSubmatch(body); len(m) > 1 {
+		return m[1]
+	}
+	if m := reReqIDText.FindStringSubmatch(body); len(m) > 1 {
+		return m[1]
+	}
+	if m := reReqIDGeneric.FindStringSubmatch(body); len(m) > 1 {
+		return m[1]
+	}
 	return ""
 }
 
@@ -301,6 +324,9 @@ func extractReqID(body string) string {
 func extractCertsrvError(body string) string {
 	if m := reDenied.FindStringSubmatch(body); len(m) > 1 {
 		return m[1]
+	}
+	if reNotAuth.MatchString(body) {
+		return "access denied / not authorized"
 	}
 	if m := reErrorMsg.FindStringSubmatch(body); len(m) > 1 {
 		return strings.TrimSpace(m[1])
