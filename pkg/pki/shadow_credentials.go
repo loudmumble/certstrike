@@ -151,8 +151,14 @@ func AddShadowCredentialWithEntry(cfg *ADCSConfig, targetDN string, entry *KeyCr
 	fmt.Printf("    DeviceID:  %s\n", entry.DeviceID)
 	fmt.Printf("    KeyID:     %s\n", entry.KeyID)
 	fmt.Printf("    Created:   %s\n", entry.CreatedAt.Format(time.RFC3339))
+	// Derive target name from DN for consistent filename guidance
+	targetName := "shadow"
+	dn, err2 := ldap.ParseDN(targetDN)
+	if err2 == nil && len(dn.RDNs) > 0 && len(dn.RDNs[0].Attributes) > 0 {
+		targetName = dn.RDNs[0].Attributes[0].Value
+	}
 	fmt.Println("[*] Next: use the private key for PKINIT authentication")
-	fmt.Printf("    certipy auth -pfx shadow.pfx -dc-ip %s\n", cfg.TargetDC)
+	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", targetName, cfg.TargetDC)
 
 	return entry, nil
 }

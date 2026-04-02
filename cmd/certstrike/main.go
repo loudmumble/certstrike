@@ -17,7 +17,7 @@ ESC1-ESC14 detection and exploitation, certificate forging, and cert-auth C2.
 
 Usage:
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local
-  certstrike pki --forge --upn admin@corp.local --ca-key ca.pem --output cert.pem
+  certstrike pki --forge --upn admin@corp.local --ca-key ca.pem
   certstrike pki --esc 1 --template VulnTemplate --upn admin@corp.local
   certstrike c2 --bind 0.0.0.0 --port 8443 --protocol https
   certstrike agent --config stager.json`,
