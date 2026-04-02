@@ -209,7 +209,7 @@ func (l *Listener) handleCheckin(w http.ResponseWriter, r *http.Request) {
 			Metadata:    req.Metadata,
 		}
 		fmt.Printf("[+] New session: %s (%s@%s %s/%s) from %s\n",
-			sessionID[:8], req.Username, req.Hostname, req.OS, req.Arch, r.RemoteAddr)
+			shortID(sessionID), req.Username, req.Hostname, req.OS, req.Arch, r.RemoteAddr)
 	} else {
 		// Update existing session
 		sess := l.sessions[sessionID]
@@ -225,7 +225,7 @@ func (l *Listener) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	if pending, ok := l.commands[sessionID]; ok && len(pending) > 0 {
 		cmds = pending
 		delete(l.commands, sessionID)
-		fmt.Printf("[*] Dispatching %d command(s) to session %s\n", len(cmds), sessionID[:8])
+		fmt.Printf("[*] Dispatching %d command(s) to session %s\n", len(cmds), shortID(sessionID))
 	}
 
 	// Drain file delivery queue for this session
@@ -233,7 +233,7 @@ func (l *Listener) handleCheckin(w http.ResponseWriter, r *http.Request) {
 	if pending, ok := l.files[sessionID]; ok && len(pending) > 0 {
 		files = pending
 		delete(l.files, sessionID)
-		fmt.Printf("[*] Dispatching %d file(s) to session %s\n", len(files), sessionID[:8])
+		fmt.Printf("[*] Dispatching %d file(s) to session %s\n", len(files), shortID(sessionID))
 	}
 
 	resp := CheckinResponse{
@@ -282,7 +282,7 @@ func (l *Listener) handleResult(w http.ResponseWriter, r *http.Request) {
 	l.mu.Unlock()
 
 	fmt.Printf("[+] Result from %s (cmd=%s, exit=%d):\n%s\n",
-		result.SessionID[:8], result.CommandID[:8], result.ExitCode, result.Output)
+		shortID(result.SessionID), shortID(result.CommandID), result.ExitCode, result.Output)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(`{"status":"received"}`))
@@ -355,13 +355,21 @@ func (l *Listener) handleQueueCommand(w http.ResponseWriter, r *http.Request) {
 	l.commands[req.SessionID] = append(l.commands[req.SessionID], cmd)
 	l.mu.Unlock()
 
-	fmt.Printf("[*] Queued command %s for session %s: %s\n", cmdID[:8], req.SessionID[:8], req.Command)
+	fmt.Printf("[*] Queued command %s for session %s: %s\n", shortID(cmdID), shortID(req.SessionID), req.Command)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":     "queued",
 		"command_id": cmdID,
 	})
+}
+
+// shortID safely truncates an ID string to 8 chars for logging.
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
 
 func (l *Listener) sessionCount() int {

@@ -130,10 +130,7 @@ func printMethod(m CertTheftMethod) {
 }
 
 func containsIgnoreCase(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		len(substr) > 0 && (s[0:len(substr)] == substr ||
-			fmt.Sprintf("%s", s) != "" && false) ||
-		indexIgnoreCase(s, substr) >= 0)
+	return indexIgnoreCase(s, substr) >= 0
 }
 
 func indexIgnoreCase(s, substr string) int {

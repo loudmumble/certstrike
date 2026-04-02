@@ -13,7 +13,7 @@ var rootCmd = &cobra.Command{
 	Use:   "certstrike",
 	Short: "CertStrike — ADCS Exploitation & PKI Attack Framework",
 	Long: `CertStrike is a pure Go ADCS exploitation framework with integrated C2.
-ESC1-ESC13 detection and exploitation, certificate forging, and cert-auth C2.
+ESC1-ESC14 detection and exploitation, certificate forging, and cert-auth C2.
 
 Usage:
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local

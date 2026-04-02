@@ -27,7 +27,8 @@ Keybindings:
   i      Input command (Commands view)
   q      Quit`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		p := tea.NewProgram(tui.NewModel(), tea.WithAltScreen())
+		c2URL, _ := cmd.Flags().GetString("c2-url")
+		p := tea.NewProgram(tui.NewModel(c2URL), tea.WithAltScreen())
 		if _, err := p.Run(); err != nil {
 			return fmt.Errorf("TUI error: %w", err)
 		}
@@ -36,5 +37,6 @@ Keybindings:
 }
 
 func init() {
+	consoleCmd.Flags().String("c2-url", "http://localhost:8080", "C2 listener URL to poll for live data")
 	rootCmd.AddCommand(consoleCmd)
 }

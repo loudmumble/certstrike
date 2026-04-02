@@ -19,6 +19,7 @@ type EnumerationResult struct {
 	ESC9Findings  []ESC9Finding   `json:"esc9_findings"`
 	ESC10Findings []ESC10Finding  `json:"esc10_findings"`
 	ESC11Findings []ESC11Finding  `json:"esc11_findings"`
+	ESC12Findings []ESC12Finding  `json:"esc12_findings"`
 	ESC13Findings []ESC13Finding  `json:"esc13_findings"`
 	ESC14Findings []ESC14Finding  `json:"esc14_findings"`
 	VulnCount     int             `json:"vuln_count"`
@@ -65,6 +66,15 @@ func EnumerateAll(cfg *ADCSConfig) (EnumerationResult, error) {
 		fmt.Printf("[!] ESC5 scan failed: %v\n", err)
 	} else {
 		result.ESC5Findings = esc5
+	}
+
+	// ESC12 — DCOM interface abuse on CA
+	stealthDelay(cfg)
+	esc12, err := ScanESC12(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC12 scan failed: %v\n", err)
+	} else {
+		result.ESC12Findings = esc12
 	}
 
 	// Step 5: ESC6 — EDITF_ATTRIBUTESUBJECTALTNAME2
@@ -149,7 +159,7 @@ func EnumerateAll(cfg *ADCSConfig) (EnumerationResult, error) {
 	result.VulnCount += len(result.ESC2Findings) + len(result.ESC3Findings) +
 		len(result.ESC5Findings) + len(result.ESC6Findings) + len(result.ESC7Findings) +
 		len(result.ESC8Findings) + len(result.ESC9Findings) + len(result.ESC10Findings) +
-		len(result.ESC11Findings) + len(result.ESC13Findings) + len(result.ESC14Findings)
+		len(result.ESC11Findings) + len(result.ESC12Findings) + len(result.ESC13Findings) + len(result.ESC14Findings)
 
 	return result, nil
 }

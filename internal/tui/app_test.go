@@ -9,7 +9,7 @@ import (
 )
 
 func TestNewModel(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	if m.view != ViewSessions {
 		t.Errorf("expected initial view ViewSessions, got %d", m.view)
 	}
@@ -46,7 +46,7 @@ func TestViewConstants(t *testing.T) {
 }
 
 func TestWindowSizeMsg(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	um := updated.(Model)
 	if um.width != 120 || um.height != 40 {
@@ -55,7 +55,7 @@ func TestWindowSizeMsg(t *testing.T) {
 }
 
 func TestKeyNavigation(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 
 	// Switch to Commands view
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
@@ -94,7 +94,7 @@ func TestKeyNavigation(t *testing.T) {
 }
 
 func TestTabCycle(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	if m.view != ViewSessions {
 		t.Fatal("expected initial view ViewSessions")
 	}
@@ -107,7 +107,7 @@ func TestTabCycle(t *testing.T) {
 }
 
 func TestMoveSelection(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.sessions = []Session{
 		{ID: "aaa", Hostname: "host1"},
 		{ID: "bbb", Hostname: "host2"},
@@ -144,7 +144,7 @@ func TestMoveSelection(t *testing.T) {
 }
 
 func TestMoveSelection_EmptyList(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.moveSelection(1)
 	if m.selectedIdx != 0 {
 		t.Errorf("expected selectedIdx 0 on empty list, got %d", m.selectedIdx)
@@ -152,7 +152,7 @@ func TestMoveSelection_EmptyList(t *testing.T) {
 }
 
 func TestRenderSessions_Empty(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	output := m.renderSessions()
 	if !strings.Contains(output, "No active sessions") {
 		t.Error("expected 'No active sessions' message for empty session list")
@@ -160,7 +160,7 @@ func TestRenderSessions_Empty(t *testing.T) {
 }
 
 func TestRenderSessions_WithData(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.sessions = []Session{
 		{ID: "abcdef1234567890", Hostname: "WORKSTATION", Username: "admin", OS: "windows", RemoteAddr: "10.0.0.5", LastCheckin: time.Now()},
 	}
@@ -174,7 +174,7 @@ func TestRenderSessions_WithData(t *testing.T) {
 }
 
 func TestRenderCommands_NoSession(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	output := m.renderCommands()
 	if !strings.Contains(output, "no session selected") {
 		t.Error("expected 'no session selected' in commands view")
@@ -182,7 +182,7 @@ func TestRenderCommands_NoSession(t *testing.T) {
 }
 
 func TestRenderCommands_WithData(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.selectedSession = "abcdef1234567890"
 	m.commands = []CommandEntry{
 		{ID: "cmd-1", Command: "whoami", Queued: time.Now(), Done: true, Output: "admin"},
@@ -197,7 +197,7 @@ func TestRenderCommands_WithData(t *testing.T) {
 }
 
 func TestRenderListeners(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	// Model starts empty; verify empty state message
 	output := m.renderListeners()
 	if !strings.Contains(output, "No active listeners") {
@@ -206,7 +206,7 @@ func TestRenderListeners(t *testing.T) {
 }
 
 func TestRenderListeners_Empty(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.listeners = nil
 	output := m.renderListeners()
 	if !strings.Contains(output, "No active listeners") {
@@ -215,7 +215,7 @@ func TestRenderListeners_Empty(t *testing.T) {
 }
 
 func TestRenderImplants(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	// Model starts empty; verify empty state message
 	output := m.renderImplants()
 	if !strings.Contains(output, "No implant configurations") {
@@ -224,7 +224,7 @@ func TestRenderImplants(t *testing.T) {
 }
 
 func TestRenderImplants_Empty(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.implants = nil
 	output := m.renderImplants()
 	if !strings.Contains(output, "No implant configurations") {
@@ -233,7 +233,7 @@ func TestRenderImplants_Empty(t *testing.T) {
 }
 
 func TestRenderPKI_Empty(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	output := m.renderPKI()
 	if !strings.Contains(output, "No templates enumerated") {
 		t.Error("expected empty PKI message")
@@ -241,7 +241,7 @@ func TestRenderPKI_Empty(t *testing.T) {
 }
 
 func TestRenderPKI_WithData(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.pkiTemplates = []PKITemplateInfo{
 		{Name: "User", ESCVulns: []string{"ESC1"}, ESCScore: 10, EnrolleeSuppliesSubject: true, AuthenticationEKU: true},
 		{Name: "WebServer", ESCVulns: nil, ESCScore: 0},
@@ -259,7 +259,7 @@ func TestRenderPKI_WithData(t *testing.T) {
 }
 
 func TestView_ContainsBanner(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	output := m.View()
 	if !strings.Contains(output, "CERTSTRIKE") {
 		t.Error("expected CERTSTRIKE banner in view output")
@@ -267,7 +267,7 @@ func TestView_ContainsBanner(t *testing.T) {
 }
 
 func TestView_ContainsStatusBar(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	output := m.View()
 	if !strings.Contains(output, "q:quit") {
 		t.Error("expected keybinding hints in status bar")
@@ -275,7 +275,7 @@ func TestView_ContainsStatusBar(t *testing.T) {
 }
 
 func TestRenderTabs(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	tabs := m.renderTabs()
 	if !strings.Contains(tabs, "Sessions") {
 		t.Error("expected Sessions tab")
@@ -286,7 +286,7 @@ func TestRenderTabs(t *testing.T) {
 }
 
 func TestTickMsg(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	before := m.lastRefresh
 	time.Sleep(1 * time.Millisecond)
 	updated, cmd := m.Update(tickMsg(time.Now()))
@@ -300,7 +300,7 @@ func TestTickMsg(t *testing.T) {
 }
 
 func TestSessionSelect(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.sessions = []Session{
 		{ID: "abcdef1234567890", Hostname: "TARGET"},
 	}
@@ -316,7 +316,7 @@ func TestSessionSelect(t *testing.T) {
 }
 
 func TestCommandInput(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	m.view = ViewCommands
 	m.selectedSession = "abcdef1234567890"
 
@@ -336,7 +336,7 @@ func TestCommandInput(t *testing.T) {
 }
 
 func TestQuit(t *testing.T) {
-	m := NewModel()
+	m := NewModel("")
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
 	if cmd == nil {
 		t.Error("expected quit command")
