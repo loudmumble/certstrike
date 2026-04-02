@@ -239,7 +239,7 @@ func runEnumerate(cmd *cobra.Command) error {
 			fmt.Printf("    Hostname:  %s\n", f.CAHostname)
 			fmt.Printf("    DCOM:      %v\n", f.DCOMAccessible)
 			fmt.Printf("    Flags:     0x%08x\n", f.Flags)
-			fmt.Printf("    Exploit:   certstrike pki --exploit esc12 --template <TEMPLATE> --upn administrator@%s --target-dc %s --domain %s\n", cfg.Domain, cfg.TargetDC, cfg.Domain)
+			fmt.Printf("    Exploit:   certstrike pki --esc 12 --template <TEMPLATE> --upn administrator@%s --target-dc %s --domain %s\n", cfg.Domain, cfg.TargetDC, cfg.Domain)
 			fmt.Println()
 		}
 	}
