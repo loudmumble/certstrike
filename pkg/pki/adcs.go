@@ -519,9 +519,6 @@ func WriteCertKeyPEM(cert *x509.Certificate, key *ecdsa.PrivateKey, basePath str
 
 	fmt.Printf("[+] Certificate written to: %s\n", certPath)
 	fmt.Printf("[+] Private key written to:  %s\n", keyPath)
-	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy cert -pfx -cert %s -key %s -out cert.pfx\n", certPath, keyPath)
-	fmt.Printf("    certipy auth -pfx cert.pfx -dc-ip <DC_IP>\n")
 	return nil
 }
 
@@ -537,14 +534,6 @@ func WritePFX(cert *x509.Certificate, key *ecdsa.PrivateKey, path, password stri
 		return fmt.Errorf("write PFX: %w", err)
 	}
 	fmt.Printf("[+] PFX written to: %s\n", path)
-	fmt.Printf("[*] Next steps:\n")
-	if password != "" {
-		fmt.Printf("    certipy auth -pfx %s -dc-ip <DC_IP> -password %s\n", path, password)
-		fmt.Printf("    Rubeus.exe asktgt /certificate:%s /password:%s /ptt\n", path, password)
-	} else {
-		fmt.Printf("    certipy auth -pfx %s -dc-ip <DC_IP>\n", path)
-		fmt.Printf("    Rubeus.exe asktgt /certificate:%s /ptt\n", path)
-	}
 	return nil
 }
 

