@@ -42,7 +42,7 @@ Examples:
 			return fmt.Errorf("--upn must be a full UPN (user@domain), got %q — try %s@%s", upn, upn, domain)
 		}
 		if outputDir == "" {
-			outputDir = "./certstrike-output"
+			outputDir = "./out"
 		}
 
 		cfg := &pki.AutoPwnConfig{
@@ -95,6 +95,6 @@ func init() {
 	autoCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash")
 	autoCmd.Flags().String("upn", "", "Target UPN to impersonate (required)")
 	autoCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN (needed for ESC9)")
-	autoCmd.Flags().String("output-dir", "./certstrike-output", "Output directory for certs")
+	autoCmd.Flags().String("output-dir", "./out", "Output directory for certs")
 	autoCmd.Flags().Bool("dry-run", false, "Enumerate and plan only, don't exploit")
 }

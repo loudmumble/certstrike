@@ -92,11 +92,15 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 		}
 
 		// Print PKINIT guidance for when exploitation completes
+		upnUser := cfg.TargetUPN
+		if idx := strings.Index(upnUser, "@"); idx > 0 {
+			upnUser = upnUser[:idx]
+		}
 		fmt.Println()
 		PrintPKINITCommands(&PKINITInfo{
-			CertPath:  filepath.Join(cfg.OutputDir, "autopwn.crt"),
-			KeyPath:   filepath.Join(cfg.OutputDir, "autopwn.key"),
-			PFXPath:   filepath.Join(cfg.OutputDir, "autopwn.pfx"),
+			CertPath:  filepath.Join(cfg.OutputDir, upnUser+".crt"),
+			KeyPath:   filepath.Join(cfg.OutputDir, upnUser+".key"),
+			PFXPath:   filepath.Join(cfg.OutputDir, upnUser+".pfx"),
 			DC:        cfg.TargetDC,
 			Domain:    cfg.Domain,
 			TargetUPN: cfg.TargetUPN,
