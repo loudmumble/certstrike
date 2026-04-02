@@ -343,9 +343,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "4":
 			m.view = ViewImplants
 			m.statusMsg = "Implants"
-	case "5":
-		m.view = ViewPKI
-		m.statusMsg = "PKI Templates"
+		case "5":
+			m.view = ViewPKI
+			m.statusMsg = "PKI Templates"
 		case "j", "down":
 			m.moveSelection(1)
 		case "k", "up":
@@ -363,7 +363,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, textinput.Blink)
 			}
 		case "tab":
-		m.view = (m.view + 1) % 5
+			m.view = (m.view + 1) % 5
 		}
 	}
 

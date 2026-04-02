@@ -18,9 +18,10 @@ Views:
   [2] Commands  — Command input, history, and results for selected session
   [3] Listeners — Active C2 listener status
   [4] Implants  — Configured implant configurations
+  [5] PKI      — Certificate and ADCS attack status
 
 Keybindings:
-  1-4    Switch views
+  1-5    Switch views
   tab    Cycle views
   j/k    Navigate up/down
   enter  Select session

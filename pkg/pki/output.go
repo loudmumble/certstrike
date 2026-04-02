@@ -68,15 +68,6 @@ func EnumerateAll(cfg *ADCSConfig) (EnumerationResult, error) {
 		result.ESC5Findings = esc5
 	}
 
-	// ESC12 — DCOM interface abuse on CA
-	stealthDelay(cfg)
-	esc12, err := ScanESC12(cfg)
-	if err != nil {
-		fmt.Printf("[!] ESC12 scan failed: %v\n", err)
-	} else {
-		result.ESC12Findings = esc12
-	}
-
 	// Step 5: ESC6 — EDITF_ATTRIBUTESUBJECTALTNAME2
 	stealthDelay(cfg)
 	esc6, err := ScanESC6(cfg)
@@ -104,7 +95,7 @@ func EnumerateAll(cfg *ADCSConfig) (EnumerationResult, error) {
 		result.ESC8Findings = esc8
 	}
 
-	// Step 4: ESC9 — CT_FLAG_NO_SECURITY_EXTENSION
+	// Step 8: ESC9 — CT_FLAG_NO_SECURITY_EXTENSION
 	stealthDelay(cfg)
 	esc9, err := ScanESC9(cfg)
 	if err != nil {
@@ -113,16 +104,7 @@ func EnumerateAll(cfg *ADCSConfig) (EnumerationResult, error) {
 		result.ESC9Findings = esc9
 	}
 
-	// Step 5: ESC11 — NTLM relay to RPC interface
-	stealthDelay(cfg)
-	esc11, err := ScanESC11(cfg)
-	if err != nil {
-		fmt.Printf("[!] ESC11 scan failed: %v\n", err)
-	} else {
-		result.ESC11Findings = esc11
-	}
-
-	// Step 6: ESC10 — Weak certificate mapping methods
+	// Step 9: ESC10 — Weak certificate mapping methods
 	stealthDelay(cfg)
 	esc10, err := ScanESC10(cfg)
 	if err != nil {
@@ -131,7 +113,25 @@ func EnumerateAll(cfg *ADCSConfig) (EnumerationResult, error) {
 		result.ESC10Findings = esc10
 	}
 
-	// Step 7: ESC13 — OID group link abuse
+	// Step 10: ESC11 — NTLM relay to RPC interface
+	stealthDelay(cfg)
+	esc11, err := ScanESC11(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC11 scan failed: %v\n", err)
+	} else {
+		result.ESC11Findings = esc11
+	}
+
+	// Step 11: ESC12 — DCOM interface abuse on CA
+	stealthDelay(cfg)
+	esc12, err := ScanESC12(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC12 scan failed: %v\n", err)
+	} else {
+		result.ESC12Findings = esc12
+	}
+
+	// Step 12: ESC13 — OID group link abuse
 	stealthDelay(cfg)
 	esc13, err := ScanESC13(cfg)
 	if err != nil {
@@ -140,7 +140,7 @@ func EnumerateAll(cfg *ADCSConfig) (EnumerationResult, error) {
 		result.ESC13Findings = esc13
 	}
 
-	// Step 8: ESC14 — Weak explicit mappings
+	// Step 13: ESC14 — Weak explicit mappings
 	stealthDelay(cfg)
 	esc14, err := ScanESC14(cfg)
 	if err != nil {

