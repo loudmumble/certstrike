@@ -354,15 +354,19 @@ func runForge(cmd *cobra.Command) error {
 	output, _ := cmd.Flags().GetString("output")
 
 	if upn == "" {
-		return fmt.Errorf("--upn is required for certificate forging")
+		return fmt.Errorf("--upn is required for certificate forging (e.g. --upn administrator@corp.local)")
+	}
+	if !strings.Contains(upn, "@") {
+		return fmt.Errorf("--upn must be a full UPN (user@domain), got %q", upn)
 	}
 	if output == "" {
 		output = "forged-cert"
 	}
 
-	// Strip .pem extension for base path if present
-	basePath := strings.TrimSuffix(output, ".pem")
-	basePath = strings.TrimSuffix(basePath, ".crt")
+	basePath := output
+	for _, ext := range []string{".pem", ".crt", ".key", ".pfx"} {
+		basePath = strings.TrimSuffix(basePath, ext)
+	}
 
 	// Golden Certificate mode: both --ca-key and --ca-cert provided
 	// Uses ForgeGoldenCertificate to sign with real CA key and chain to real CA cert
