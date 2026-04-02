@@ -48,8 +48,21 @@ Examples:
 			certTheft, _ = cmd.Flags().GetString("cert-theft") // legacy
 		}
 
-		if !doEnum && !doForge && exploit == "" && !doAutoDetect && importPFX == "" && !doReport && certTheft == "" {
+		// Count how many actions are requested
+		actionCount := 0
+		if doEnum { actionCount++ }
+		if doForge { actionCount++ }
+		if exploit != "" { actionCount++ }
+		if doAutoDetect { actionCount++ }
+		if importPFX != "" { actionCount++ }
+		if doReport { actionCount++ }
+		if certTheft != "" { actionCount++ }
+
+		if actionCount == 0 {
 			return cmd.Help()
+		}
+		if actionCount > 1 {
+			return fmt.Errorf("specify only one action at a time (--enum, --esc, --forge, --auto-detect, --report, --theft, --import-pfx)")
 		}
 
 		if certTheft != "" {
@@ -344,7 +357,7 @@ func runForge(cmd *cobra.Command) error {
 		return fmt.Errorf("--upn is required for certificate forging")
 	}
 	if output == "" {
-		output = "forged-cert.pem"
+		output = "forged-cert"
 	}
 
 	// Strip .pem extension for base path if present
@@ -465,7 +478,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		return fmt.Errorf("--upn must be a full UPN (user@domain), got %q — try %s@%s", upn, upn, cfg.Domain)
 	}
 	if output == "" {
-		output = "exploited-cert.pem"
+		output = "exploited-cert"
 	}
 
 	var cert *x509.Certificate
@@ -562,8 +575,10 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	}
 
 	pfxPassword, _ := cmd.Flags().GetString("pfx-password")
-	basePath := strings.TrimSuffix(output, ".pem")
-	basePath = strings.TrimSuffix(basePath, ".crt")
+	basePath := output
+	for _, ext := range []string{".pem", ".crt", ".key", ".pfx"} {
+		basePath = strings.TrimSuffix(basePath, ext)
+	}
 
 	// Always write PEM files
 	if err := pki.WriteCertKeyPEM(cert, certKey, basePath); err != nil {
