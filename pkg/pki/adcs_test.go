@@ -5,8 +5,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/asn1"
 	"os"
 	"testing"
+
+	"software.sslmate.com/src/go-pkcs12"
 )
 
 func TestBuildCertTemplateBaseDN(t *testing.T) {
@@ -158,5 +161,132 @@ func TestWritePFX(t *testing.T) {
 	}
 	if len(data) < 32 {
 		t.Errorf("PFX file too small: %d bytes", len(data))
+	}
+}
+
+// TestForgeCertificate_UPN_SAN_Encoding validates that the forged certificate
+// contains a correctly encoded UPN OtherName SAN that can be parsed back.
+// This is the exact encoding that certipy/Rubeus check when extracting identities.
+func TestForgeCertificate_UPN_SAN_Encoding(t *testing.T) {
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	upn := "administrator@corp.local"
+	cert, _, err := ForgeCertificate(caKey, upn)
+	if err != nil {
+		t.Fatalf("ForgeCertificate: %v", err)
+	}
+
+	// Find the SAN extension (OID 2.5.29.17)
+	sanOID := asn1.ObjectIdentifier{2, 5, 29, 17}
+	var sanExt []byte
+	for _, ext := range cert.Extensions {
+		if ext.Id.Equal(sanOID) {
+			sanExt = ext.Value
+			break
+		}
+	}
+	if sanExt == nil {
+		t.Fatal("no SAN extension found in certificate")
+	}
+
+	// Parse SEQUENCE OF GeneralName
+	var rawSAN asn1.RawValue
+	if _, err := asn1.Unmarshal(sanExt, &rawSAN); err != nil {
+		t.Fatalf("unmarshal SAN SEQUENCE: %v", err)
+	}
+	if rawSAN.Tag != asn1.TagSequence {
+		t.Fatalf("SAN outer tag: got 0x%02X, want 0x10 (SEQUENCE)", rawSAN.Tag)
+	}
+
+	// Parse GeneralName — must be [0] CONTEXT-SPECIFIC CONSTRUCTED (OtherName)
+	var gn asn1.RawValue
+	if _, err := asn1.Unmarshal(rawSAN.Bytes, &gn); err != nil {
+		t.Fatalf("unmarshal GeneralName: %v", err)
+	}
+	if gn.Tag != 0 || gn.Class != asn1.ClassContextSpecific || !gn.IsCompound {
+		t.Fatalf("GeneralName: tag=%d class=%d constructed=%v, want tag=0 class=2 constructed=true",
+			gn.Tag, gn.Class, gn.IsCompound)
+	}
+
+	// Parse OtherName OID — must be szOID_NT_PRINCIPAL_NAME
+	var oid asn1.ObjectIdentifier
+	rest, err := asn1.Unmarshal(gn.Bytes, &oid)
+	if err != nil {
+		t.Fatalf("unmarshal OtherName OID: %v", err)
+	}
+	expectedOID := asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 311, 20, 2, 3}
+	if !oid.Equal(expectedOID) {
+		t.Fatalf("OID: got %s, want %s", oid, expectedOID)
+	}
+
+	// Parse [0] EXPLICIT { UTF8String }
+	var explicit0 asn1.RawValue
+	if _, err := asn1.Unmarshal(rest, &explicit0); err != nil {
+		t.Fatalf("unmarshal [0] EXPLICIT: %v", err)
+	}
+
+	var extractedUPN string
+	if _, err := asn1.Unmarshal(explicit0.Bytes, &extractedUPN); err != nil {
+		t.Fatalf("unmarshal UTF8String: %v", err)
+	}
+	if extractedUPN != upn {
+		t.Fatalf("UPN: got %q, want %q", extractedUPN, upn)
+	}
+}
+
+// TestPFX_RoundTrip validates forge → PFX export → PFX import → cert matches.
+func TestPFX_RoundTrip(t *testing.T) {
+	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	upn := "svc_scan@bruno.vl"
+	cert, certKey, err := ForgeCertificate(caKey, upn)
+	if err != nil {
+		t.Fatalf("ForgeCertificate: %v", err)
+	}
+
+	// Export to PFX
+	pfxPath := t.TempDir() + "/roundtrip.pfx"
+	password := "test123"
+	if err := WritePFX(cert, certKey, pfxPath, password); err != nil {
+		t.Fatalf("WritePFX: %v", err)
+	}
+
+	// Read PFX back
+	pfxData, err := os.ReadFile(pfxPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	// Decode PFX
+	privKey, parsedCert, err := pkcs12.Decode(pfxData, password)
+	if err != nil {
+		t.Fatalf("pkcs12.Decode: %v", err)
+	}
+
+	// Verify the cert matches
+	if parsedCert.Subject.CommonName != cert.Subject.CommonName {
+		t.Errorf("CN mismatch: got %q, want %q", parsedCert.Subject.CommonName, cert.Subject.CommonName)
+	}
+	if parsedCert.SerialNumber.Cmp(cert.SerialNumber) != 0 {
+		t.Errorf("serial mismatch: got %s, want %s", parsedCert.SerialNumber, cert.SerialNumber)
+	}
+
+	// Verify the key matches
+	ecKey, ok := privKey.(*ecdsa.PrivateKey)
+	if !ok {
+		t.Fatalf("expected *ecdsa.PrivateKey, got %T", privKey)
+	}
+	if !ecKey.PublicKey.Equal(&certKey.PublicKey) {
+		t.Error("public key mismatch between exported and imported PFX")
+	}
+
+	// Verify SAN is preserved through PFX round-trip
+	sanOID := asn1.ObjectIdentifier{2, 5, 29, 17}
+	hasSAN := false
+	for _, ext := range parsedCert.Extensions {
+		if ext.Id.Equal(sanOID) {
+			hasSAN = true
+		}
+	}
+	if !hasSAN {
+		t.Error("SAN extension lost during PFX round-trip")
 	}
 }
