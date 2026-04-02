@@ -198,7 +198,12 @@ func (s *Server) runPKIForge(args map[string]interface{}) map[string]interface{}
 		return toolError("upn is required")
 	}
 	if output == "" {
-		output = "forged-cert.pem"
+		// Default to UPN username (e.g., administrator@corp.local → administrator.pem)
+		if idx := strings.Index(upn, "@"); idx > 0 {
+			output = upn[:idx] + ".pem"
+		} else {
+			output = upn + ".pem"
+		}
 	}
 
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

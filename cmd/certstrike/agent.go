@@ -13,7 +13,7 @@ executes queued commands, and returns results.
 
 Examples:
   certstrike agent --config stager.json
-  certstrike agent --config cert-auth-implant/implant-config.json`,
+  certstrike agent --config cert-auth-implant/administrator-implant.json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configPath, _ := cmd.Flags().GetString("config")
 		return c2.RunAgent(configPath)

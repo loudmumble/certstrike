@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -79,8 +80,12 @@ func GenerateCertAuthImplant(c2URL, upn, outputDir string) (*CertAuthImplantConf
 		return nil, fmt.Errorf("create certificate: %w", err)
 	}
 
-	// Write certificate PEM
-	certPath := outputDir + "/implant-cert.pem"
+	// Write certificate PEM — use UPN username as base name
+	upnUser := upn
+	if idx := strings.Index(upnUser, "@"); idx > 0 {
+		upnUser = upnUser[:idx]
+	}
+	certPath := outputDir + "/" + upnUser + "-implant.pem"
 	certFile, err := os.Create(certPath)
 	if err != nil {
 		return nil, fmt.Errorf("create cert file: %w", err)
@@ -89,7 +94,7 @@ func GenerateCertAuthImplant(c2URL, upn, outputDir string) (*CertAuthImplantConf
 	certFile.Close()
 
 	// Write key PEM
-	keyPath := outputDir + "/implant-key.pem"
+	keyPath := outputDir + "/" + upnUser + "-implant-key.pem"
 	keyFile, err := os.Create(keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("create key file: %w", err)
@@ -117,7 +122,7 @@ func GenerateCertAuthImplant(c2URL, upn, outputDir string) (*CertAuthImplantConf
 	}
 
 	// Write config JSON
-	configPath := outputDir + "/implant-config.json"
+	configPath := outputDir + "/" + upnUser + "-implant.json"
 	configData, _ := json.MarshalIndent(config, "", "  ")
 	if err := os.WriteFile(configPath, configData, 0600); err != nil {
 		return nil, fmt.Errorf("write config: %w", err)

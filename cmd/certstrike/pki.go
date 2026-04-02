@@ -360,7 +360,12 @@ func runForge(cmd *cobra.Command) error {
 		return fmt.Errorf("--upn must be a full UPN (user@domain), got %q", upn)
 	}
 	if output == "" {
-		output = "forged-cert"
+		// Default to UPN username (e.g., administrator@corp.local → administrator)
+		if idx := strings.Index(upn, "@"); idx > 0 {
+			output = upn[:idx]
+		} else {
+			output = upn
+		}
 	}
 
 	basePath := output
@@ -482,7 +487,12 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		return fmt.Errorf("--upn must be a full UPN (user@domain), got %q — try %s@%s", upn, upn, cfg.Domain)
 	}
 	if output == "" {
-		output = "exploited-cert"
+		// Default to UPN username (e.g., administrator@corp.local → administrator)
+		if idx := strings.Index(upn, "@"); idx > 0 {
+			output = upn[:idx]
+		} else {
+			output = upn
+		}
 	}
 
 	var cert *x509.Certificate

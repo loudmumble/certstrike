@@ -271,11 +271,15 @@ func executeExploit(cfg *AutoPwnConfig, c escCandidate) (*x509.Certificate, *ecd
 
 // writeAutoPwnOutput writes cert, key, and PFX files to the output directory.
 func writeAutoPwnOutput(cfg *AutoPwnConfig, c escCandidate, cert *x509.Certificate, key *ecdsa.PrivateKey) (*AutoPwnResult, error) {
-	// Sanitize template name for filesystem use
-	safeName := strings.ReplaceAll(c.templateName, " ", "_")
+	// Use UPN username as base, with ESC type suffix for disambiguation
+	upnUser := cfg.TargetUPN
+	if idx := strings.Index(upnUser, "@"); idx > 0 {
+		upnUser = upnUser[:idx]
+	}
+	safeName := strings.ReplaceAll(upnUser, " ", "_")
 	safeName = strings.ReplaceAll(safeName, "/", "_")
 
-	baseName := fmt.Sprintf("autopwn_%s_%s", strings.ToLower(c.escType), safeName)
+	baseName := fmt.Sprintf("%s_%s", safeName, strings.ToLower(c.escType))
 	basePath := filepath.Join(cfg.OutputDir, baseName)
 
 	if err := WriteCertKeyPEM(cert, key, basePath); err != nil {
