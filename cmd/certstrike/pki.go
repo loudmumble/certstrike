@@ -22,7 +22,7 @@ var pkiCmd = &cobra.Command{
 
 Examples:
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass
-  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --tls
+  certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --ldaps
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --json
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user -p pass --stealth
   certstrike pki --enum --target-dc dc01.corp.local --domain corp.local -u user --hash aad3b435b51404eeaad3b435b51404ee
@@ -78,7 +78,7 @@ func buildADCSConfig(cmd *cobra.Command) *pki.ADCSConfig {
 	username, _ := cmd.Flags().GetString("username")
 	password, _ := cmd.Flags().GetString("password")
 	hash, _ := cmd.Flags().GetString("hash")
-	useTLS, _ := cmd.Flags().GetBool("tls")
+	useTLS, _ := cmd.Flags().GetBool("ldaps")
 	useStartTLS, _ := cmd.Flags().GetBool("start-tls")
 	outputJSON, _ := cmd.Flags().GetBool("json")
 	stealth, _ := cmd.Flags().GetBool("stealth")
@@ -684,7 +684,7 @@ func init() {
 	pkiCmd.Flags().StringP("username", "u", "", "Domain username for LDAP authentication")
 	pkiCmd.Flags().StringP("password", "p", "", "Domain password for LDAP authentication")
 	pkiCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash authentication")
-	pkiCmd.Flags().Bool("tls", false, "Use LDAPS (port 636)")
+	pkiCmd.Flags().Bool("ldaps", false, "Use LDAPS (port 636)")
 	pkiCmd.Flags().Bool("start-tls", false, "Use StartTLS (upgrade plaintext LDAP to TLS)")
 
 	// Certificate flags
