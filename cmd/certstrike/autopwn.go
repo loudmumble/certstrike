@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/loudmumble/certstrike/pkg/pki"
 	"github.com/spf13/cobra"
@@ -31,8 +32,14 @@ Examples:
 		if targetDC == "" || domain == "" {
 			return fmt.Errorf("--target-dc and --domain are required")
 		}
+		if username == "" || (password == "" && hash == "") {
+			return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+		}
 		if upn == "" {
-			return fmt.Errorf("--upn is required (target user to impersonate)")
+			return fmt.Errorf("--upn is required (target user to impersonate, e.g. administrator@%s)", domain)
+		}
+		if !strings.Contains(upn, "@") {
+			return fmt.Errorf("--upn must be a full UPN (user@domain), got %q — try %s@%s", upn, upn, domain)
 		}
 		if outputDir == "" {
 			outputDir = "./certstrike-output"

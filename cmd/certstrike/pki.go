@@ -443,19 +443,26 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required")
 	}
+	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
+		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+	}
 
 	templateName, _ := cmd.Flags().GetString("template")
 	upn, _ := cmd.Flags().GetString("upn")
 	output, _ := cmd.Flags().GetString("output")
 
-	if templateName == "" {
-		return fmt.Errorf("--template is required for exploitation")
+	// ESC8/ESC12 are relay scans — they don't require --template or --upn
+	escID := strings.ToLower(strings.TrimPrefix(strings.ToLower(exploit), "esc"))
+	isRelay := escID == "8" || escID == "12"
+
+	if templateName == "" && !isRelay {
+		return fmt.Errorf("--template is required for exploitation (e.g. --template User)")
 	}
-	if upn == "" {
-		return fmt.Errorf("--upn is required for exploitation")
+	if upn == "" && !isRelay {
+		return fmt.Errorf("--upn is required for exploitation (e.g. --upn administrator@%s)", cfg.Domain)
 	}
-	if !strings.Contains(upn, "@") {
-		return fmt.Errorf("--upn must be a full UPN (user@domain), got %q", upn)
+	if upn != "" && !strings.Contains(upn, "@") {
+		return fmt.Errorf("--upn must be a full UPN (user@domain), got %q — try %s@%s", upn, upn, cfg.Domain)
 	}
 	if output == "" {
 		output = "exploited-cert.pem"
@@ -465,8 +472,6 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	var certKey *ecdsa.PrivateKey
 	var err error
 
-	// Normalize: accept "1", "esc1", "ESC1" etc.
-	escID := strings.ToLower(strings.TrimPrefix(strings.ToLower(exploit), "esc"))
 	switch escID {
 	case "1":
 		cert, certKey, err = pki.ExploitESC1(cfg, templateName, upn)
@@ -601,6 +606,9 @@ func runAutoDetect(cmd *cobra.Command) error {
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required")
 	}
+	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
+		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+	}
 
 	vulnerable, err := pki.AutoDetectESC(cfg)
 	if err != nil {
@@ -655,6 +663,9 @@ func runReport(cmd *cobra.Command) error {
 	cfg := buildADCSConfig(cmd)
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required for report generation")
+	}
+	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
+		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
 	}
 
 	reportFormat, _ := cmd.Flags().GetString("format")

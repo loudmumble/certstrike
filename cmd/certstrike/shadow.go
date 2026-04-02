@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/loudmumble/certstrike/pkg/pki"
 	"github.com/spf13/cobra"
@@ -37,8 +38,11 @@ Examples:
 		if targetDC == "" || domain == "" {
 			return fmt.Errorf("--target-dc and --domain are required")
 		}
+		if username == "" || (password == "" && hash == "") {
+			return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+		}
 		if target == "" {
-			return fmt.Errorf("--target (DN of target user) is required")
+			return fmt.Errorf("--target (DN of target user) is required, e.g. CN=victim,CN=Users,DC=%s", strings.ReplaceAll(domain, ".", ",DC="))
 		}
 
 		cfg := &pki.ADCSConfig{
