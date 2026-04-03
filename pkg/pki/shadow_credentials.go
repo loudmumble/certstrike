@@ -158,7 +158,7 @@ func AddShadowCredentialWithEntry(cfg *ADCSConfig, targetDN string, entry *KeyCr
 		targetName = dn.RDNs[0].Attributes[0].Value
 	}
 	fmt.Println("[*] Next: use the private key for PKINIT authentication")
-	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", targetName, cfg.TargetDC)
+	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", targetName, cfg.Domain)
 
 	return entry, nil
 }

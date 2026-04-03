@@ -58,7 +58,8 @@
         "secretsdump.py pass-the-ticket command uses -dc-ip <DC_IP> and domain (not DC hostname)"
       ],
       "priority": "high",
-      "passes": false,
+      "passes": true,
+      "completed_at": "2026-04-03",
       "notes": "impacket getTGT.py has no -pfx flag"
     },
     {

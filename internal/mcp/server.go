@@ -4,9 +4,8 @@ package mcp
 
 import (
 	"bufio"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -206,7 +205,7 @@ func (s *Server) runPKIForge(args map[string]interface{}) map[string]interface{}
 		}
 	}
 
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return toolError(fmt.Sprintf("Generate CA key: %v", err))
 	}

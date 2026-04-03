@@ -1,9 +1,8 @@
 package pki
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/asn1"
 	"os"
@@ -87,7 +86,7 @@ func TestEnumerate(t *testing.T) {
 }
 
 func TestForgeCertificate(t *testing.T) {
-	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("Failed to generate CA key: %v", err)
 	}
@@ -126,7 +125,7 @@ func TestForgeCertificate(t *testing.T) {
 }
 
 func TestForgeCertificate_WithDifferentUPNs(t *testing.T) {
-	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	for _, upn := range []string{"user@domain.local", "administrator@corp.internal", "svc@test.lab"} {
 		t.Run(upn, func(t *testing.T) {
 			cert, certKey, err := ForgeCertificate(caKey, upn)
@@ -144,7 +143,7 @@ func TestForgeCertificate_WithDifferentUPNs(t *testing.T) {
 }
 
 func TestWritePFX(t *testing.T) {
-	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	cert, certKey, err := ForgeCertificate(caKey, "testuser@corp.local")
 	if err != nil {
 		t.Fatalf("ForgeCertificate: %v", err)
@@ -168,7 +167,7 @@ func TestWritePFX(t *testing.T) {
 // contains a correctly encoded UPN OtherName SAN that can be parsed back.
 // This is the exact encoding that certipy/Rubeus check when extracting identities.
 func TestForgeCertificate_UPN_SAN_Encoding(t *testing.T) {
-	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	upn := "administrator@corp.local"
 	cert, _, err := ForgeCertificate(caKey, upn)
 	if err != nil {
@@ -235,7 +234,7 @@ func TestForgeCertificate_UPN_SAN_Encoding(t *testing.T) {
 
 // TestPFX_RoundTrip validates forge → PFX export → PFX import → cert matches.
 func TestPFX_RoundTrip(t *testing.T) {
-	caKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	caKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	upn := "svc_scan@bruno.vl"
 	cert, certKey, err := ForgeCertificate(caKey, upn)
 	if err != nil {
@@ -270,11 +269,15 @@ func TestPFX_RoundTrip(t *testing.T) {
 	}
 
 	// Verify the key matches
-	ecKey, ok := privKey.(*ecdsa.PrivateKey)
+	rsaKey, ok := privKey.(*rsa.PrivateKey)
 	if !ok {
-		t.Fatalf("expected *ecdsa.PrivateKey, got %T", privKey)
+		t.Fatalf("expected *rsa.PrivateKey, got %T", privKey)
 	}
-	if !ecKey.PublicKey.Equal(&certKey.PublicKey) {
+	pubKey, ok := certKey.Public().(*rsa.PublicKey)
+	if !ok {
+		t.Fatalf("expected *rsa.PublicKey from certKey.Public(), got %T", certKey.Public())
+	}
+	if !rsaKey.PublicKey.Equal(pubKey) {
 		t.Error("public key mismatch between exported and imported PFX")
 	}
 

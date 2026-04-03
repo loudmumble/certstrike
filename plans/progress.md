@@ -63,3 +63,13 @@ All 7 acceptance criteria confirmed:
 - GeneratePKINITScript uses certipy-ad (lines 75-77, 89-90)
 - Two generic "certipy" references in adcs.go comments (lines 495, 530) are documentation, not commands
 - Build + tests pass
+
+## Iteration 3 — V-003 Verified ✓
+
+All 4 acceptance criteria confirmed:
+- No `getTGT.py -pfx` anywhere in .go files (zero matches)
+- pkinit.go uses `gettgtpkinit.py -cert-pfx` (lines 37-38, 81-83)
+- PKINIT script uses gettgtpkinit.py not getTGT.py (lines 81-83, 89)
+- secretsdump.py uses `-dc-ip <DC_IP>` and domain (line 48: `%s/%s@%s` with domain)
+- unpac.go also correctly uses gettgtpkinit.py (line 29)
+- Build + tests pass

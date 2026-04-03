@@ -28,6 +28,7 @@ Examples:
 		attackerDN, _ := cmd.Flags().GetString("attacker-dn")
 		outputDir, _ := cmd.Flags().GetString("output-dir")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		interactive, _ := cmd.Flags().GetBool("interactive")
 
 		if targetDC == "" || domain == "" {
 			return fmt.Errorf("--target-dc and --domain are required")
@@ -50,10 +51,11 @@ Examples:
 				TargetDC: targetDC, Domain: domain,
 				Username: username, Password: password, Hash: hash,
 			},
-			TargetUPN:  upn,
-			AttackerDN: attackerDN,
-			OutputDir:  outputDir,
-			DryRun:     dryRun,
+			TargetUPN:   upn,
+			AttackerDN:  attackerDN,
+			OutputDir:   outputDir,
+			DryRun:      dryRun,
+			Interactive: interactive,
 		}
 
 		result, err := pki.AutoPwn(cfg)
@@ -63,24 +65,9 @@ Examples:
 
 		if result == nil {
 			fmt.Println("[*] No exploitable paths found (or dry-run completed)")
-			return nil
 		}
 
-		// Print PKINIT commands
-		pki.PrintPKINITCommands(&pki.PKINITInfo{
-			CertPath:  result.CertPath,
-			KeyPath:   result.KeyPath,
-			PFXPath:   result.PFXPath,
-			DC:        targetDC,
-			Domain:    domain,
-			TargetUPN: upn,
-		})
-
-		// Print UnPAC commands
-		if result.PFXPath != "" {
-			pki.PrintUnPACCommands(result.PFXPath, targetDC, domain, upn)
-		}
-
+		// PKINIT + UnPAC commands are already printed by AutoPwn()
 		return nil
 	},
 }
@@ -97,4 +84,5 @@ func init() {
 	autoCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN (needed for ESC9)")
 	autoCmd.Flags().String("output-dir", "./out", "Output directory for certs")
 	autoCmd.Flags().Bool("dry-run", false, "Enumerate and plan only, don't exploit")
+	autoCmd.Flags().BoolP("interactive", "i", false, "Interactively select which ESC path(s) to attempt")
 }

