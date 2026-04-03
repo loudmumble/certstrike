@@ -111,8 +111,9 @@
         "ESC12 scan-only handler (case '12') shows ntlmrelayx command"
       ],
       "priority": "low",
-      "passes": false,
-      "notes": "ESC12 is scan-only, was suggesting unsupported certstrike command"
+      "passes": true,
+      "completed_at": "2026-04-03",
+      "notes": "ESC12 is scan-only, was suggesting unsupported certstrike command. Also fixed chain.go ESC12 steps."
     },
     {
       "id": "V-008",

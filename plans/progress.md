@@ -101,3 +101,11 @@ All 4 acceptance criteria confirmed:
 - Flag value read at line 31, passed to AutoPwnConfig at line 58
 - Interactive mode gated behind `cfg.Interactive && !cfg.DryRun` (line 85)
 - Build + tests pass
+
+## Iteration 7 — V-007 Verified + Fixed ✓
+
+Both acceptance criteria confirmed:
+- pki.go ESC12 enum output (line 315) uses `ntlmrelayx.py -t dcom://` — correct
+- pki.go case '12' handler (line 653) uses `ntlmrelayx.py -t dcom://` — correct
+- Found and fixed chain.go ESC12 attack chain steps (line 196): was still using `certstrike pki --esc 12`, changed to `ntlmrelayx.py -t dcom://`
+- Build + tests pass

