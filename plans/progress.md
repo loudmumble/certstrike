@@ -109,3 +109,11 @@ Both acceptance criteria confirmed:
 - pki.go case '12' handler (line 653) uses `ntlmrelayx.py -t dcom://` — correct
 - Found and fixed chain.go ESC12 attack chain steps (line 196): was still using `certstrike pki --esc 12`, changed to `ntlmrelayx.py -t dcom://`
 - Build + tests pass
+
+## Iteration 8 — V-008 Verified ✓
+
+All 3 acceptance criteria confirmed:
+- `CGO_ENABLED=0 go build -o /dev/null ./cmd/certstrike` succeeds with no output (clean build)
+- `CGO_ENABLED=0 go test ./...` passes all 4 test packages (mcp, tui, c2, pki)
+- No compilation warnings or errors
+- All 8 verification tasks now pass — loop complete
