@@ -167,3 +167,14 @@ Fixed Rubeus /user: to use sAMAccountName instead of full UPN in two locations:
 - pkinit.go:35 was already correct (uses `user` variable)
 - All three Rubeus commands now consistently use sAMAccountName format
 - Build + tests pass
+
+## Iteration 14 — V-014 Fixed ✓
+
+Fixed chain.go ESC11/ESC12 ntlmrelayx commands to use `<CA_NAME>` placeholder instead of `tmpl.Name`:
+- chain.go:188 (ESC11): `-icpr-ca-name` was using `tmpl.Name` (template name) — changed to `<CA_NAME>` placeholder
+- chain.go:196 (ESC12): `-icpr-ca-name` was using `tmpl.Name` — changed to `<CA_NAME>` placeholder
+- CA name is not available in `buildSteps()` context (it lives in ESC11Finding/ESC12Finding, not CertTemplate or ADCSConfig)
+- Placeholder approach consistent with ESC7 which already uses `<CA_NAME>` pattern
+- autopwn.go:262 was already correct — uses `f.CAName` from ESC11Finding
+- `-dcom-mode ICPR` flag kept as-is — matches pki.go:315 (verified correct in prior iteration)
+- Build + tests pass

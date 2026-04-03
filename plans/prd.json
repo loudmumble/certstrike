@@ -95,8 +95,9 @@
         "Tests pass"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": "chain.go:188 passes tmpl.Name to -icpr-ca-name but this should be the CA name. chain.go:196 uses -dcom-mode which may not be a real ntlmrelayx flag."
+      "passes": true,
+      "completed_at": "2026-04-03T11:10:00Z",
+      "notes": "Fixed chain.go:188 ESC11 and chain.go:196 ESC12 to use <CA_NAME> placeholder instead of tmpl.Name for -icpr-ca-name. CA name is not available in buildSteps context (only in ESC11Finding/ESC12Finding structs), so placeholder is consistent with ESC7's <CA_NAME> pattern. autopwn.go:262 already correctly used f.CAName. -dcom-mode ICPR flag kept as-is (consistent with pki.go:315 verified correct). Build + tests pass."
     },
     {
       "id": "V-015",

