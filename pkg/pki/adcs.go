@@ -241,14 +241,15 @@ func scoreESC(tmpl *CertTemplate) {
 		tmpl.ESCScore += 10
 	}
 
-	// ESC2: Any Purpose EKU or no EKU + enrollee supplies subject
+	// ESC2: Any Purpose EKU or no EKU restrictions + enrollee supplies subject
 	hasAnyPurpose := false
+	noEKUs := len(tmpl.EKUs) == 0
 	for _, eku := range tmpl.EKUs {
 		if eku == ekuAnyPurpose {
 			hasAnyPurpose = true
 		}
 	}
-	if hasAnyPurpose && tmpl.EnrolleeSuppliesSubject {
+	if (hasAnyPurpose || noEKUs) && tmpl.EnrolleeSuppliesSubject {
 		tmpl.ESCVulns = append(tmpl.ESCVulns, "ESC2")
 		tmpl.ESCScore += 8
 	}

