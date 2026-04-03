@@ -99,7 +99,8 @@
         "certstrike auto --help shows -i flag"
       ],
       "priority": "medium",
-      "passes": false,
+      "passes": true,
+      "completed_at": "2026-04-03",
       "notes": "User requested interactive selection when multiple paths available"
     },
     {

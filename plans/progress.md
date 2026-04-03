@@ -91,3 +91,13 @@ All 4 acceptance criteria confirmed:
 - Self-signed certs print skipping message and `continue` to next candidate (lines 153-155)
 - Only CA-signed certs reach AutoPwn SUCCESS (line 166), after passing self-signed guard
 - Build + tests pass
+
+## Iteration 6 — V-006 Verified ✓
+
+All 4 acceptance criteria confirmed:
+- AutoPwnConfig has `Interactive bool` field (autopwn.go:22)
+- promptPathSelection function exists (autopwn.go:338)
+- cmd/certstrike/autopwn.go registers `--interactive` / `-i` flag via BoolP (line 87)
+- Flag value read at line 31, passed to AutoPwnConfig at line 58
+- Interactive mode gated behind `cfg.Interactive && !cfg.DryRun` (line 85)
+- Build + tests pass
