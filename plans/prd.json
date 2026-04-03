@@ -65,8 +65,9 @@
         "Tests pass"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": "pkinit.go:42 has wrong certipy-ad cert syntax. Real certipy-ad uses: certipy-ad cert -pfx <file> -export or openssl pkcs12 -export -in cert.pem -inkey key.pem -out cert.pfx"
+      "passes": true,
+      "completed_at": "2026-04-03T10:40:00Z",
+      "notes": "Fixed pkinit.go:42 PEM-to-PFX conversion from wrong certipy-ad cert syntax to openssl pkcs12 -export which is universally available and reliable. Build + tests pass."
     },
     {
       "id": "V-013",

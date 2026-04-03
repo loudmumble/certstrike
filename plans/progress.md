@@ -149,3 +149,12 @@ All 4 acceptance criteria confirmed:
 - No `.pem` extension references in user-facing output (WriteCertKeyPEM writes .crt/.key despite the function name)
 - Follow-up commands are consistent: all use certipy-ad auth -pfx with correct path
 - Build + tests pass
+
+## Iteration 12 — V-012 Fixed ✓
+
+Fix applied:
+- pkinit.go:42 had wrong certipy-ad cert syntax: `certipy-ad cert -pfx -cert ... -key ... -out ...`
+- Replaced with `openssl pkcs12 -export -in <cert> -inkey <key> -out <pfx> -passout pass:`
+- openssl is more universally available and has stable syntax
+- This is in the fallback branch where PFX doesn't exist but cert+key files do
+- Build + tests pass

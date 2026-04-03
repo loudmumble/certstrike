@@ -39,7 +39,7 @@ func PrintPKINITCommands(info *PKINITInfo) {
 	} else if info.CertPath != "" && info.KeyPath != "" {
 		pfxPath := strings.TrimSuffix(info.CertPath, filepath.Ext(info.CertPath)) + ".pfx"
 		fmt.Println("    # Convert to PFX first:")
-		fmt.Printf("    certipy-ad cert -pfx -cert %s -key %s -out %s\n\n", info.CertPath, info.KeyPath, pfxPath)
+		fmt.Printf("    openssl pkcs12 -export -in %s -inkey %s -out %s -passout pass:\n\n", info.CertPath, info.KeyPath, pfxPath)
 		fmt.Printf("    certipy-ad auth -pfx %s -dc-ip <DC_IP> -domain %s\n\n", pfxPath, info.Domain)
 	}
 
