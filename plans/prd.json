@@ -4,129 +4,67 @@
   "acceptanceCriteria": [
     "Build passes with CGO_ENABLED=0",
     "All tests pass",
-    "No ECDSA key generation in PKI exploit path",
-    "All follow-up commands use certipy-ad, not certipy",
-    "No getTGT.py -pfx in any output",
-    "Autopwn prints PKINIT+UnPAC exactly once",
-    "Self-signed fallback skips to next candidate in autopwn",
-    "Interactive path selection works with -i flag"
+    "MS-ICPR RPC enrollment works via ICertPassage SMB pipe",
+    "UPN SAN passed via CertAttrib in web enrollment",
+    "RC promote-to-GitHub checklist complete"
   ],
   "features": [
     {
-      "id": "V-001",
-      "title": "RSA 2048 key generation in all PKI exploit paths",
+      "id": "V-009",
+      "title": "Verify MS-ICPR RPC enrollment via ICertPassage over SMB named pipe",
       "acceptanceCriteria": [
-        "enroll.go generates RSA 2048 keys (grep for rsa.GenerateKey)",
-        "adcs.go ForgeCertificate generates RSA 2048 keys",
-        "adcs.go ForgeGoldenCertificate generates RSA 2048 keys",
-        "No ecdsa.GenerateKey in enroll.go, adcs.go, or mcp/server.go",
-        "C2 and shadow_credentials still use ECDSA (intentional)",
-        "WriteCertKeyPEM uses x509.MarshalPKCS8PrivateKey (not MarshalECPrivateKey)",
-        "PEM type is 'PRIVATE KEY' not 'EC PRIVATE KEY'",
-        "All ExploitESC* functions return crypto.Signer (not *ecdsa.PrivateKey)",
-        "Tests pass with RSA keys (TestPFX_RoundTrip checks *rsa.PrivateKey)"
+        "ICertPassage interface or struct exists in pkg/pki/",
+        "SMB named pipe connection to cert service is implemented",
+        "RPC enrollment path calls ICertPassage RequestCertificate (or equivalent)",
+        "CLI flag or auto-detection selects RPC vs web enrollment",
+        "Build passes with CGO_ENABLED=0",
+        "Tests covering RPC enrollment path exist and pass"
       ],
       "priority": "high",
       "passes": true,
-      "completed_at": "2026-04-03",
-      "notes": "Root cause fix - certipy-ad and Rubeus require RSA keys"
+      "completed_at": "2026-04-03T10:20:00Z",
+      "notes": "Committed in 5dac0a7 - verified: ICertPassage struct/UUID in rpc_enroll.go, SMB named pipe to \\pipe\\cert, CertServerRequest opnum 0, auto-detection (RPC first, fallback to web), tests added in rpc_enroll_test.go"
     },
     {
-      "id": "V-002",
-      "title": "certipy-ad in all follow-up commands",
+      "id": "V-010",
+      "title": "Verify UPN SAN via CertAttrib in web enrollment",
       "acceptanceCriteria": [
-        "No 'certipy auth' or 'certipy relay' or 'certipy cert' in .go files (must be certipy-ad)",
-        "pkinit.go uses certipy-ad",
-        "unpac.go uses certipy-ad",
-        "All ESC exploit files (adcs.go, esc2-13.go) use certipy-ad in Next steps",
-        "pki.go command handler uses certipy-ad for ESC8/ESC11/ESC12 scan output",
-        "shadow_credentials.go uses certipy-ad",
-        "PKINIT script (GeneratePKINITScript) uses certipy-ad"
+        "Web enrollment (certsrv) passes UPN SAN via certificate attributes, not CSR",
+        "CertAttrib field includes san:upn= or equivalent attribute",
+        "ESC6 exploitation still works with SAN injection via request attributes",
+        "No regression in ESC1 enrollment (enrollee-supplied subject)",
+        "Build passes with CGO_ENABLED=0",
+        "Tests pass"
       ],
       "priority": "high",
-      "passes": true,
-      "completed_at": "2026-04-03",
-      "notes": "certipy is a different package than certipy-ad"
+      "passes": false,
+      "notes": "Committed in 0c5dcfa - needs full verification"
     },
     {
-      "id": "V-003",
-      "title": "Correct impacket/PKINITtools command syntax",
+      "id": "V-011",
+      "title": "Verify no misleading per-ESC next steps with wrong file paths",
       "acceptanceCriteria": [
-        "No 'getTGT.py -pfx' anywhere in .go files",
-        "pkinit.go uses 'gettgtpkinit.py -cert-pfx' for PKINITtools",
-        "PKINIT script uses gettgtpkinit.py not getTGT.py",
-        "secretsdump.py pass-the-ticket command uses -dc-ip <DC_IP> and domain (not DC hostname)"
-      ],
-      "priority": "high",
-      "passes": true,
-      "completed_at": "2026-04-03",
-      "notes": "impacket getTGT.py has no -pfx flag"
-    },
-    {
-      "id": "V-004",
-      "title": "No duplicate PKINIT/UnPAC output in autopwn",
-      "acceptanceCriteria": [
-        "autopwn.go (lib) prints both PKINIT and UnPAC commands",
-        "cmd/certstrike/autopwn.go does NOT call PrintPKINITCommands or PrintUnPACCommands",
-        "Output appears exactly once when autopwn succeeds"
+        "No ESC exploit output references nonexistent file paths",
+        "Next steps commands reference correct output filenames (cert.pem, key.pem, cert.pfx)",
+        "All ESC exploit functions print consistent follow-up commands",
+        "Build passes with CGO_ENABLED=0"
       ],
       "priority": "medium",
-      "passes": true,
-      "completed_at": "2026-04-03",
-      "notes": "Was printing PKINIT twice and UnPAC once extra"
+      "passes": false,
+      "notes": "Committed in 8cd1f85 - needs verification"
     },
     {
-      "id": "V-005",
-      "title": "Autopwn skips self-signed fallback certs",
-      "acceptanceCriteria": [
-        "IsSelfSigned function exists in enroll.go",
-        "autopwn.go checks IsSelfSigned(cert) after executeExploit",
-        "Self-signed certs cause 'skipping' message and continue to next candidate",
-        "Only CA-signed certs trigger AutoPwn SUCCESS"
-      ],
-      "priority": "medium",
-      "passes": true,
-      "completed_at": "2026-04-03",
-      "notes": "Was declaring SUCCESS on self-signed fallback certs"
-    },
-    {
-      "id": "V-006",
-      "title": "Interactive ESC path selection (-i flag)",
-      "acceptanceCriteria": [
-        "AutoPwnConfig has Interactive bool field",
-        "autopwn.go has promptPathSelection function",
-        "cmd/certstrike/autopwn.go has --interactive / -i flag",
-        "certstrike auto --help shows -i flag"
-      ],
-      "priority": "medium",
-      "passes": true,
-      "completed_at": "2026-04-03",
-      "notes": "User requested interactive selection when multiple paths available"
-    },
-    {
-      "id": "V-007",
-      "title": "ESC12 enum shows correct relay command (not certstrike)",
-      "acceptanceCriteria": [
-        "pki.go ESC12 enum output uses ntlmrelayx.py -t dcom:// (not certstrike pki --esc 12)",
-        "ESC12 scan-only handler (case '12') shows ntlmrelayx command"
-      ],
-      "priority": "low",
-      "passes": true,
-      "completed_at": "2026-04-03",
-      "notes": "ESC12 is scan-only, was suggesting unsupported certstrike command. Also fixed chain.go ESC12 steps."
-    },
-    {
-      "id": "V-008",
-      "title": "Full build and test suite passes",
+      "id": "V-012",
+      "title": "Full build and test suite passes post-RC",
       "acceptanceCriteria": [
         "CGO_ENABLED=0 go build -o /dev/null ./cmd/certstrike succeeds",
         "CGO_ENABLED=0 go test ./... succeeds (all packages)",
-        "No compilation warnings or errors"
+        "No compilation warnings or errors",
+        "go vet ./... passes clean"
       ],
       "priority": "high",
-      "passes": true,
-      "completed_at": "2026-04-03",
-      "notes": "Final gate - everything must compile and tests must pass"
+      "passes": false,
+      "notes": "Final gate after all recent changes"
     }
   ]
 }

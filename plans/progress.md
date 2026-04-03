@@ -117,3 +117,13 @@ All 3 acceptance criteria confirmed:
 - `CGO_ENABLED=0 go test ./...` passes all 4 test packages (mcp, tui, c2, pki)
 - No compilation warnings or errors
 - All 8 verification tasks now pass — loop complete
+
+## Iteration 9 — V-009 Verified ✓
+
+All 6 acceptance criteria confirmed:
+- ICertPassage interface UUID exists in rpc_enroll.go (line 15, UUID 91ae6020-9e3c-11cf-8d7c-00aa00c091be)
+- SMB named pipe connection to `\pipe\cert` implemented (rpc_enroll.go:60-63, via smbSession from coerce.go)
+- RPC enrollment calls CertServerRequest opnum 0 (rpc_enroll.go:74-75)
+- Auto-detection: tries RPC first, falls back to HTTP web enrollment (enroll.go:129-139)
+- Build passes with CGO_ENABLED=0
+- Tests added in rpc_enroll_test.go covering: UUID, NDR stub building, CertTransBlob round-trip, UTF-16LE decode, security buffer extraction, RPC data extraction, PKCS7 cert extraction, interface smoke test
