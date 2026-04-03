@@ -37,8 +37,9 @@
         "Tests pass"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": "Committed in 0c5dcfa - needs full verification"
+      "passes": true,
+      "completed_at": "2026-04-03T10:25:00Z",
+      "notes": "Verified: sanInject=true omits UPN from CSR (enroll.go:79-80), SAN:upn= built at enroll.go:146 and appended to CertAttrib at enroll.go:216-218, ESC6 calls with sanInject=true (esc6.go:113), ESC7 calls with sanInject=true (esc7.go:233), ESC1 calls with sanInject=false (adcs.go:409) preserving enrollee-supplied subject. Build + tests pass."
     },
     {
       "id": "V-011",

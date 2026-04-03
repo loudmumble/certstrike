@@ -127,3 +127,15 @@ All 6 acceptance criteria confirmed:
 - Auto-detection: tries RPC first, falls back to HTTP web enrollment (enroll.go:129-139)
 - Build passes with CGO_ENABLED=0
 - Tests added in rpc_enroll_test.go covering: UUID, NDR stub building, CertTransBlob round-trip, UTF-16LE decode, security buffer extraction, RPC data extraction, PKCS7 cert extraction, interface smoke test
+
+## Iteration 10 — V-010 Verified ✓
+
+All 6 acceptance criteria confirmed:
+- Web enrollment passes UPN SAN via CertAttrib, not CSR: when sanInject=true, csrUPN="" (enroll.go:79-80), UPN omitted from CSR
+- CertAttrib includes `SAN:upn=<UPN>` (enroll.go:146), appended to certAttrib (enroll.go:216-218), sent in form data (enroll.go:224)
+- ESC6 calls EnrollCertificate with sanInject=true (esc6.go:113) — SAN injection works
+- ESC7 also calls with sanInject=true (esc7.go:233) — same path
+- ESC1 calls with sanInject=false (adcs.go:409) — no regression, UPN stays in CSR
+- ESC2/3/9/13 all call with sanInject=false — no regression
+- Build passes with CGO_ENABLED=0
+- All tests pass
