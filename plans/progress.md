@@ -82,3 +82,12 @@ All 3 acceptance criteria confirmed:
 - cmd/certstrike/autopwn.go does NOT call PrintPKINITCommands or PrintUnPACCommands (line 70 comment confirms)
 - Output appears exactly once per execution path — no duplication
 - Build + tests pass
+
+## Iteration 5 — V-005 Verified ✓
+
+All 4 acceptance criteria confirmed:
+- IsSelfSigned function exists in enroll.go (line 161), checks Issuer.CommonName == Subject.CommonName
+- autopwn.go checks IsSelfSigned(cert) after executeExploit (line 152)
+- Self-signed certs print skipping message and `continue` to next candidate (lines 153-155)
+- Only CA-signed certs reach AutoPwn SUCCESS (line 166), after passing self-signed guard
+- Build + tests pass

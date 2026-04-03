@@ -85,7 +85,8 @@
         "Only CA-signed certs trigger AutoPwn SUCCESS"
       ],
       "priority": "medium",
-      "passes": false,
+      "passes": true,
+      "completed_at": "2026-04-03",
       "notes": "Was declaring SUCCESS on self-signed fallback certs"
     },
     {
