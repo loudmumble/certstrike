@@ -71,7 +71,8 @@
         "Output appears exactly once when autopwn succeeds"
       ],
       "priority": "medium",
-      "passes": false,
+      "passes": true,
+      "completed_at": "2026-04-03",
       "notes": "Was printing PKINIT twice and UnPAC once extra"
     },
     {

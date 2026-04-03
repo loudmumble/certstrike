@@ -73,3 +73,12 @@ All 4 acceptance criteria confirmed:
 - secretsdump.py uses `-dc-ip <DC_IP>` and domain (line 48: `%s/%s@%s` with domain)
 - unpac.go also correctly uses gettgtpkinit.py (line 29)
 - Build + tests pass
+
+## Iteration 4 — V-004 Verified ✓
+
+All 3 acceptance criteria confirmed:
+- pkg/pki/autopwn.go prints PKINIT commands in two mutually exclusive paths: dry-run (line 111) and success (line 167)
+- pkg/pki/autopwn.go prints UnPAC commands once on success path only (line 176)
+- cmd/certstrike/autopwn.go does NOT call PrintPKINITCommands or PrintUnPACCommands (line 70 comment confirms)
+- Output appears exactly once per execution path — no duplication
+- Build + tests pass
