@@ -178,3 +178,12 @@ Fixed chain.go ESC11/ESC12 ntlmrelayx commands to use `<CA_NAME>` placeholder in
 - autopwn.go:262 was already correct — uses `f.CAName` from ESC11Finding
 - `-dcom-mode ICPR` flag kept as-is — matches pki.go:315 (verified correct in prior iteration)
 - Build + tests pass
+
+## Iteration 15 — V-015 Verified ✓
+
+All 4 acceptance criteria confirmed:
+- `CGO_ENABLED=0 go build -o /dev/null ./cmd/certstrike` succeeds with no output (clean build)
+- `CGO_ENABLED=0 go test ./...` passes all 4 test packages (mcp, tui, c2, pki)
+- No compilation warnings or errors
+- `go vet ./...` passes clean (no output)
+- All 15 verification tasks (V-001 through V-015) now pass — RC verification loop complete
