@@ -158,3 +158,12 @@ Fix applied:
 - openssl is more universally available and has stable syntax
 - This is in the fallback branch where PFX doesn't exist but cert+key files do
 - Build + tests pass
+
+## Iteration 13 — V-013 Fixed ✓
+
+Fixed Rubeus /user: to use sAMAccountName instead of full UPN in two locations:
+- unpac.go:25 — changed `upn` to `user` (already stripped at line 12-15)
+- cmd/certstrike/pki.go:804 — added sAMAccountName extraction (strip @domain) before Rubeus command
+- pkinit.go:35 was already correct (uses `user` variable)
+- All three Rubeus commands now consistently use sAMAccountName format
+- Build + tests pass

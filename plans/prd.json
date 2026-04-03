@@ -80,8 +80,9 @@
         "Tests pass"
       ],
       "priority": "high",
-      "passes": false,
-      "notes": "unpac.go:25 passes full UPN to Rubeus /user: but Rubeus expects sAMAccountName. Line uses 'upn' var instead of 'user' var."
+      "passes": true,
+      "completed_at": "2026-04-03T11:00:00Z",
+      "notes": "Fixed unpac.go:25 to use 'user' (stripped sAMAccountName) instead of 'upn' for Rubeus /user:. Also fixed cmd/certstrike/pki.go:804 which had the same issue — added sAMAccountName stripping before Rubeus command. pkinit.go:35 was already correct. Build + tests pass."
     },
     {
       "id": "V-014",

