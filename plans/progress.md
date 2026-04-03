@@ -139,3 +139,13 @@ All 6 acceptance criteria confirmed:
 - ESC2/3/9/13 all call with sanInject=false — no regression
 - Build passes with CGO_ENABLED=0
 - All tests pass
+
+## Iteration 11 — V-011 Verified ✓
+
+All 4 acceptance criteria confirmed:
+- Exploit ESCs (1-4,6,7,9,13) share common handler (pki.go:753-805) writing .crt/.key/.pfx and output references exactly those extensions (pki.go:800)
+- Scan-only ESCs (5,8,10,11,12,14) print appropriate next-step commands; relay ESCs (8,12) use `<cert.pfx>` placeholder for post-relay auth — correct since file doesn't exist yet
+- PKINIT commands (pkinit.go:32) use actual PFXPath passed from handler, not hardcoded names
+- No `.pem` extension references in user-facing output (WriteCertKeyPEM writes .crt/.key despite the function name)
+- Follow-up commands are consistent: all use certipy-ad auth -pfx with correct path
+- Build + tests pass

@@ -51,11 +51,53 @@
         "Build passes with CGO_ENABLED=0"
       ],
       "priority": "medium",
-      "passes": false,
-      "notes": "Committed in 8cd1f85 - needs verification"
+      "passes": true,
+      "completed_at": "2026-04-03T10:35:00Z",
+      "notes": "Verified: exploit ESCs (1-4,6,7,9,13) share common handler writing .crt/.key/.pfx and referencing those exact extensions in output (pki.go:800). Scan-only ESCs (5,8,10,11,12,14) print appropriate next-step commands without referencing nonexistent files. PKINIT commands use actual PFXPath from handler. No .pem references in user-facing output. Build + tests pass."
     },
     {
       "id": "V-012",
+      "title": "Fix certipy-ad cert PEM-to-PFX conversion command syntax",
+      "acceptanceCriteria": [
+        "pkinit.go PEM-to-PFX conversion uses correct certipy-ad syntax: 'certipy-ad cert -export -pfx <out.pfx> -cert <cert.pem> -key <key.pem>' (not 'certipy-ad cert -pfx -cert ... -key ... -out ...')",
+        "Alternatively use openssl pkcs12 syntax if certipy-ad cert subcommand is unreliable",
+        "Build passes with CGO_ENABLED=0",
+        "Tests pass"
+      ],
+      "priority": "high",
+      "passes": false,
+      "notes": "pkinit.go:42 has wrong certipy-ad cert syntax. Real certipy-ad uses: certipy-ad cert -pfx <file> -export or openssl pkcs12 -export -in cert.pem -inkey key.pem -out cert.pfx"
+    },
+    {
+      "id": "V-013",
+      "title": "Fix Rubeus asktgt /user parameter to use sAMAccountName not full UPN",
+      "acceptanceCriteria": [
+        "unpac.go Rubeus.exe asktgt /user: uses stripped username (no @domain), not full UPN",
+        "pkinit.go Rubeus.exe asktgt /user: uses stripped username (no @domain)",
+        "All Rubeus commands use sAMAccountName format for /user: parameter",
+        "Build passes with CGO_ENABLED=0",
+        "Tests pass"
+      ],
+      "priority": "high",
+      "passes": false,
+      "notes": "unpac.go:25 passes full UPN to Rubeus /user: but Rubeus expects sAMAccountName. Line uses 'upn' var instead of 'user' var."
+    },
+    {
+      "id": "V-014",
+      "title": "Fix ntlmrelayx ESC11/ESC12 chain.go commands - CA name vs template name",
+      "acceptanceCriteria": [
+        "chain.go ESC11 ntlmrelayx -icpr-ca-name uses CA name variable (not template name)",
+        "chain.go ESC12 ntlmrelayx command uses valid flags for DCOM relay",
+        "autopwn.go ESC11 relay command (line ~261) uses CA name not template name for -icpr-ca-name",
+        "Build passes with CGO_ENABLED=0",
+        "Tests pass"
+      ],
+      "priority": "high",
+      "passes": false,
+      "notes": "chain.go:188 passes tmpl.Name to -icpr-ca-name but this should be the CA name. chain.go:196 uses -dcom-mode which may not be a real ntlmrelayx flag."
+    },
+    {
+      "id": "V-015",
       "title": "Full build and test suite passes post-RC",
       "acceptanceCriteria": [
         "CGO_ENABLED=0 go build -o /dev/null ./cmd/certstrike succeeds",
@@ -65,7 +107,7 @@
       ],
       "priority": "high",
       "passes": false,
-      "notes": "Final gate after all recent changes"
+      "notes": "Final gate after all follow-up command fixes"
     }
   ]
 }
