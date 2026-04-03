@@ -50,3 +50,16 @@ All 9 acceptance criteria confirmed:
 - All 8 ExploitESC* functions return crypto.Signer
 - TestPFX_RoundTrip asserts *rsa.PrivateKey
 - Build + tests pass
+
+## Iteration 2 — V-002 Verified ✓
+
+All 7 acceptance criteria confirmed:
+- No bare `certipy auth`/`certipy relay`/`certipy cert` commands in any .go file
+- pkinit.go uses certipy-ad throughout (lines 31-32, 42-43, 75-77, 89-90)
+- unpac.go uses certipy-ad (lines 20-21)
+- All ESC exploit files (esc2, esc3, esc6, esc7, esc9, esc13, adcs.go) use certipy-ad in next steps
+- pki.go scan-only handlers use certipy-ad for ESC8 (line 639), ESC11 (line 720), ESC12 (line 658)
+- shadow_credentials.go uses certipy-ad (line 161)
+- GeneratePKINITScript uses certipy-ad (lines 75-77, 89-90)
+- Two generic "certipy" references in adcs.go comments (lines 495, 530) are documentation, not commands
+- Build + tests pass

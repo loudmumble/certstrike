@@ -44,7 +44,8 @@
         "PKINIT script (GeneratePKINITScript) uses certipy-ad"
       ],
       "priority": "high",
-      "passes": false,
+      "passes": true,
+      "completed_at": "2026-04-03",
       "notes": "certipy is a different package than certipy-ad"
     },
     {
