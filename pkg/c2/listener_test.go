@@ -206,6 +206,105 @@ func TestGenerateStagerConfig(t *testing.T) {
 	}
 }
 
+func TestListener_HandleResult(t *testing.T) {
+	listener := &Listener{}
+	listener.sessions = make(map[string]*ImplantSession)
+	listener.commands = make(map[string][]QueuedCommand)
+	listener.results = make(map[string][]CommandResult)
+
+	sessionID := "test-session-result-001"
+	listener.sessions[sessionID] = &ImplantSession{ID: sessionID, Hostname: "TARGET"}
+
+	body := `{"session_id":"` + sessionID + `","command_id":"cmd-001","output":"NT AUTHORITY\\SYSTEM","exit_code":0}`
+	req := httptest.NewRequest(http.MethodPost, "/result", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	listener.handleResult(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected status 200, got %d", w.Code)
+	}
+
+	// Verify result stored
+	results := listener.GetResults(sessionID)
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	if results[0].Output != "NT AUTHORITY\\SYSTEM" {
+		t.Errorf("Expected output 'NT AUTHORITY\\SYSTEM', got %q", results[0].Output)
+	}
+	if results[0].ExitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d", results[0].ExitCode)
+	}
+	if results[0].CommandID != "cmd-001" {
+		t.Errorf("Expected command ID 'cmd-001', got %s", results[0].CommandID)
+	}
+}
+
+func TestListener_HandleResult_MethodNotAllowed(t *testing.T) {
+	listener := &Listener{}
+	listener.results = make(map[string][]CommandResult)
+
+	req := httptest.NewRequest(http.MethodGet, "/result", nil)
+	w := httptest.NewRecorder()
+	listener.handleResult(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected status 405, got %d", w.Code)
+	}
+}
+
+func TestListener_FullFlow_QueueAndResult(t *testing.T) {
+	listener := &Listener{}
+	listener.sessions = make(map[string]*ImplantSession)
+	listener.commands = make(map[string][]QueuedCommand)
+	listener.results = make(map[string][]CommandResult)
+
+	// Step 1: Checkin
+	body1 := `{"hostname":"WORKSTATION","username":"admin","os":"windows","arch":"amd64","pid":5678}`
+	req1 := httptest.NewRequest(http.MethodPost, "/connect", strings.NewReader(body1))
+	w1 := httptest.NewRecorder()
+	listener.handleCheckin(w1, req1)
+
+	var checkinResp CheckinResponse
+	json.Unmarshal(w1.Body.Bytes(), &checkinResp)
+	sessionID := checkinResp.SessionID
+	if sessionID == "" {
+		t.Fatal("checkin should return session ID")
+	}
+
+	// Step 2: Queue command
+	cmdID, err := listener.QueueCommand(sessionID, "whoami", "")
+	if err != nil {
+		t.Fatalf("QueueCommand: %v", err)
+	}
+
+	// Step 3: Verify command is in queue
+	cmds := listener.commands[sessionID]
+	if len(cmds) != 1 {
+		t.Fatalf("expected 1 queued command, got %d", len(cmds))
+	}
+
+	// Step 4: Submit result
+	resultBody := `{"session_id":"` + sessionID + `","command_id":"` + cmdID + `","output":"admin","exit_code":0}`
+	req4 := httptest.NewRequest(http.MethodPost, "/result", strings.NewReader(resultBody))
+	w4 := httptest.NewRecorder()
+	listener.handleResult(w4, req4)
+
+	if w4.Code != http.StatusOK {
+		t.Fatalf("result submission: expected 200, got %d", w4.Code)
+	}
+
+	// Step 5: Get results
+	results := listener.GetResults(sessionID)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Output != "admin" {
+		t.Errorf("expected output 'admin', got %q", results[0].Output)
+	}
+}
+
 func TestListener_SessionCount(t *testing.T) {
 	listener := &Listener{}
 	listener.sessions = make(map[string]*ImplantSession)

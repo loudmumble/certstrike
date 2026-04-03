@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/loudmumble/certstrike/pkg/c2"
 )
 
 func TestNewServer(t *testing.T) {
@@ -261,6 +263,77 @@ func TestCallTool_C2GetResults_NoListener(t *testing.T) {
 	result := s.callTool("c2_get_results", map[string]interface{}{})
 	if result["isError"] != true {
 		t.Error("expected error when no listener running")
+	}
+}
+
+func TestCallTool_PKIForge_HappyPath(t *testing.T) {
+	s := NewServer(nil)
+	dir := t.TempDir()
+	result := s.callTool("pki_forge", map[string]interface{}{
+		"upn":    "admin@corp.local",
+		"output": dir + "/admin.crt",
+	})
+	if result["isError"] == true {
+		content, _ := result["content"].([]map[string]interface{})
+		if len(content) > 0 {
+			t.Fatalf("pki_forge error: %v", content[0]["text"])
+		}
+		t.Fatal("pki_forge returned error")
+	}
+	content, ok := result["content"].([]map[string]interface{})
+	if !ok || len(content) == 0 {
+		t.Fatal("expected content array")
+	}
+	text, _ := content[0]["text"].(string)
+	if !strings.Contains(text, "completed") {
+		t.Errorf("expected 'completed' in result, got %q", text)
+	}
+	if !strings.Contains(text, "admin") {
+		t.Errorf("expected 'admin' in result, got %q", text)
+	}
+}
+
+func TestCallTool_C2ListSessions_WithListener(t *testing.T) {
+	// Start a real listener on a random port so maps are initialized
+	listener := &c2.Listener{
+		BindAddress: "127.0.0.1",
+		Port:        0,
+		Protocol:    "http",
+	}
+	go listener.Start()
+	time.Sleep(100 * time.Millisecond)
+
+	s := NewServer(listener)
+	result := s.callTool("c2_list_sessions", map[string]interface{}{})
+	if result["isError"] == true {
+		t.Error("c2_list_sessions with listener should not error")
+	}
+	content, ok := result["content"].([]map[string]interface{})
+	if !ok || len(content) == 0 {
+		t.Fatal("expected content array")
+	}
+	text, _ := content[0]["text"].(string)
+	if !strings.Contains(text, "sessions") {
+		t.Errorf("expected 'sessions' in result, got %q", text)
+	}
+}
+
+func TestCallTool_C2QueueCommand_WithListener_SessionNotFound(t *testing.T) {
+	listener := &c2.Listener{
+		BindAddress: "127.0.0.1",
+		Port:        0,
+		Protocol:    "http",
+	}
+	go listener.Start()
+	time.Sleep(100 * time.Millisecond)
+
+	s := NewServer(listener)
+	result := s.callTool("c2_queue_command", map[string]interface{}{
+		"session_id": "nonexistent",
+		"command":    "whoami",
+	})
+	if result["isError"] != true {
+		t.Error("expected error for nonexistent session")
 	}
 }
 
