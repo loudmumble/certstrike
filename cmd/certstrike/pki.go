@@ -941,7 +941,7 @@ func init() {
 	// Connection flags
 	pkiCmd.Flags().String("target-dc", "", "Target domain controller hostname")
 	pkiCmd.Flags().String("domain", "", "Active Directory domain name")
-	pkiCmd.Flags().StringP("username", "u", "", "Domain username for LDAP authentication")
+	pkiCmd.Flags().StringP("username", "u", "", "Domain username (user or user@domain)")
 	pkiCmd.Flags().StringP("password", "p", "", "Domain password for LDAP authentication")
 	pkiCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash authentication")
 	pkiCmd.Flags().BoolP("kerberos", "k", false, "Use Kerberos authentication (GSSAPI/SPNEGO)")

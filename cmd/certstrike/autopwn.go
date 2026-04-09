@@ -82,7 +82,7 @@ func init() {
 
 	autoCmd.Flags().String("target-dc", "", "Target domain controller")
 	autoCmd.Flags().String("domain", "", "Active Directory domain")
-	autoCmd.Flags().StringP("username", "u", "", "Domain username")
+	autoCmd.Flags().StringP("username", "u", "", "Domain username (user or user@domain)")
 	autoCmd.Flags().StringP("password", "p", "", "Domain password")
 	autoCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash")
 	autoCmd.Flags().BoolP("kerberos", "k", false, "Use Kerberos authentication (GSSAPI/SPNEGO)")

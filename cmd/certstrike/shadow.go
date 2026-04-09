@@ -121,7 +121,7 @@ func init() {
 	shadowCmd.Flags().String("device-id", "", "DeviceID of credential to remove")
 	shadowCmd.Flags().String("target-dc", "", "Target domain controller")
 	shadowCmd.Flags().String("domain", "", "Active Directory domain")
-	shadowCmd.Flags().StringP("username", "u", "", "Domain username")
+	shadowCmd.Flags().StringP("username", "u", "", "Domain username (user or user@domain)")
 	shadowCmd.Flags().StringP("password", "p", "", "Domain password")
 	shadowCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash")
 	shadowCmd.Flags().BoolP("kerberos", "k", false, "Use Kerberos authentication (GSSAPI/SPNEGO)")
