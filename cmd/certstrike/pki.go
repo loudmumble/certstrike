@@ -105,6 +105,10 @@ func buildADCSConfig(cmd *cobra.Command) *pki.ADCSConfig {
 	useStartTLS, _ := cmd.Flags().GetBool("start-tls")
 	outputJSON, _ := cmd.Flags().GetBool("json")
 	stealth, _ := cmd.Flags().GetBool("stealth")
+	kerberos, _ := cmd.Flags().GetBool("kerberos")
+	ccache, _ := cmd.Flags().GetString("ccache")
+	keytabPath, _ := cmd.Flags().GetString("keytab")
+	kdcIP, _ := cmd.Flags().GetString("dc-ip")
 
 	return &pki.ADCSConfig{
 		TargetDC:    targetDC,
@@ -116,6 +120,10 @@ func buildADCSConfig(cmd *cobra.Command) *pki.ADCSConfig {
 		UseStartTLS: useStartTLS,
 		OutputJSON:  outputJSON,
 		Stealth:     stealth,
+		Kerberos:    kerberos,
+		CCache:      ccache,
+		Keytab:      keytabPath,
+		KDCIP:       kdcIP,
 	}
 }
 
@@ -124,8 +132,8 @@ func runEnumerate(cmd *cobra.Command) error {
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required for enumeration")
 	}
-	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
-		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+	if !cfg.Kerberos && (cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "")) {
+		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH> or -k for Kerberos)")
 	}
 
 	// JSON mode: use EnumerateAll for structured output
@@ -543,8 +551,8 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required")
 	}
-	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
-		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+	if !cfg.Kerberos && (cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "")) {
+		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH> or -k for Kerberos)")
 	}
 
 	templateName, _ := cmd.Flags().GetString("template")
@@ -820,8 +828,8 @@ func runAutoDetect(cmd *cobra.Command) error {
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required")
 	}
-	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
-		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+	if !cfg.Kerberos && (cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "")) {
+		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH> or -k for Kerberos)")
 	}
 
 	vulnerable, err := pki.AutoDetectESC(cfg)
@@ -878,8 +886,8 @@ func runReport(cmd *cobra.Command) error {
 	if cfg.TargetDC == "" || cfg.Domain == "" {
 		return fmt.Errorf("--target-dc and --domain are required for report generation")
 	}
-	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
-		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+	if !cfg.Kerberos && (cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "")) {
+		return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH> or -k for Kerberos)")
 	}
 
 	reportFormat, _ := cmd.Flags().GetString("format")
@@ -936,6 +944,10 @@ func init() {
 	pkiCmd.Flags().StringP("username", "u", "", "Domain username for LDAP authentication")
 	pkiCmd.Flags().StringP("password", "p", "", "Domain password for LDAP authentication")
 	pkiCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash authentication")
+	pkiCmd.Flags().BoolP("kerberos", "k", false, "Use Kerberos authentication (GSSAPI/SPNEGO)")
+	pkiCmd.Flags().String("ccache", "", "Path to Kerberos ccache file (default: KRB5CCNAME env)")
+	pkiCmd.Flags().String("keytab", "", "Path to Kerberos keytab file")
+	pkiCmd.Flags().String("dc-ip", "", "KDC IP address (if different from --target-dc)")
 	pkiCmd.Flags().Bool("ldaps", false, "Use LDAPS (port 636)")
 	pkiCmd.Flags().Bool("start-tls", false, "Use StartTLS (upgrade plaintext LDAP to TLS)")
 

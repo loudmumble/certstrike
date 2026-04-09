@@ -99,6 +99,10 @@ func toolList() []map[string]interface{} {
 					"username":  map[string]interface{}{"type": "string", "description": "Domain username for LDAP bind."},
 					"password":  map[string]interface{}{"type": "string", "description": "Domain password."},
 					"hash":      map[string]interface{}{"type": "string", "description": "NTLM hash for pass-the-hash."},
+					"kerberos": map[string]interface{}{"type": "boolean", "description": "Use Kerberos authentication (GSSAPI/SPNEGO)."},
+					"ccache":   map[string]interface{}{"type": "string", "description": "Path to Kerberos ccache file."},
+					"keytab":   map[string]interface{}{"type": "string", "description": "Path to Kerberos keytab file."},
+					"dc_ip":    map[string]interface{}{"type": "string", "description": "KDC IP address (if different from target_dc)."},
 				},
 				"required": []string{"target_dc", "domain"},
 			},
@@ -169,6 +173,10 @@ func (s *Server) runPKIEnumerate(args map[string]interface{}) map[string]interfa
 	username, _ := args["username"].(string)
 	password, _ := args["password"].(string)
 	hash, _ := args["hash"].(string)
+	kerberos, _ := args["kerberos"].(bool)
+	ccache, _ := args["ccache"].(string)
+	keytab, _ := args["keytab"].(string)
+	dcIP, _ := args["dc_ip"].(string)
 
 	if targetDC == "" || domain == "" {
 		return toolError("target_dc and domain are required")
@@ -177,6 +185,7 @@ func (s *Server) runPKIEnumerate(args map[string]interface{}) map[string]interfa
 	cfg := &pki.ADCSConfig{
 		TargetDC: targetDC, Domain: domain,
 		Username: username, Password: password, Hash: hash,
+		Kerberos: kerberos, CCache: ccache, Keytab: keytab, KDCIP: dcIP,
 	}
 
 	templates, err := pki.Enumerate(cfg)

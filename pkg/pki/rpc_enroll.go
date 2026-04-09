@@ -45,11 +45,18 @@ func EnrollCertificateRPC(cfg *ADCSConfig, caHostname, caName, templateName stri
 		return nil, fmt.Errorf("SMB negotiate: %w", err)
 	}
 
-	// Authenticated NTLM session setup
-	if err := s.sessionSetupNTLM(cfg); err != nil {
-		return nil, fmt.Errorf("SMB NTLM auth: %w", err)
+	// Authenticated session setup
+	if cfg.Kerberos {
+		if err := s.sessionSetupKerberos(cfg, caHostname); err != nil {
+			return nil, fmt.Errorf("SMB Kerberos auth: %w", err)
+		}
+		fmt.Printf("[+] SMB2 Kerberos session established (authenticated as %s)\n", cfg.Username)
+	} else {
+		if err := s.sessionSetupNTLM(cfg); err != nil {
+			return nil, fmt.Errorf("SMB NTLM auth: %w", err)
+		}
+		fmt.Printf("[+] SMB2 session established (authenticated as %s)\n", cfg.Username)
 	}
-	fmt.Printf("[+] SMB2 session established (authenticated as %s)\n", cfg.Username)
 
 	// Tree connect to IPC$
 	if err := s.treeConnect(caHostname); err != nil {

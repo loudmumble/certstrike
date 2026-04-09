@@ -31,6 +31,10 @@ type ADCSConfig struct {
 	Username    string
 	Password    string
 	Hash        string
+	Kerberos    bool   // -k: use Kerberos authentication (GSSAPI/SPNEGO)
+	CCache      string // path to ccache file (default: KRB5CCNAME env)
+	Keytab      string // path to keytab file
+	KDCIP       string // KDC IP address (if different from TargetDC)
 	UseTLS      bool
 	UseStartTLS bool
 	OutputJSON  bool
@@ -342,8 +346,21 @@ func connectLDAP(cfg *ADCSConfig) (*ldap.Conn, error) {
 		return nil, fmt.Errorf("connect to %s: %w", cfg.TargetDC, err)
 	}
 
-	// Bind with credentials — pass-the-hash takes priority over password
-	if cfg.Username != "" && cfg.Hash != "" {
+	// Bind with credentials — Kerberos > NTLM hash > password
+	if cfg.Kerberos {
+		gssClient, err := newGSSAPIClient(cfg)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("Kerberos GSSAPI client: %w", err)
+		}
+		spn := fmt.Sprintf("ldap/%s", cfg.TargetDC)
+		if err := conn.GSSAPIBind(gssClient, spn, ""); err != nil {
+			gssClient.Close()
+			conn.Close()
+			return nil, fmt.Errorf("Kerberos GSSAPI bind to %s: %w", spn, err)
+		}
+		fmt.Printf("[+] Kerberos GSSAPI bind successful: %s\n", cfg.Username)
+	} else if cfg.Username != "" && cfg.Hash != "" {
 		// NTLM pass-the-hash: supply the NT hash directly; the SASL mechanism
 		// uses it in place of a derived NTLM response, so plaintext is never needed.
 		req := &ldap.NTLMBindRequest{

@@ -33,13 +33,17 @@ Examples:
 		username, _ := cmd.Flags().GetString("username")
 		password, _ := cmd.Flags().GetString("password")
 		hash, _ := cmd.Flags().GetString("hash")
+		kerberos, _ := cmd.Flags().GetBool("kerberos")
+		ccache, _ := cmd.Flags().GetString("ccache")
+		keytabPath, _ := cmd.Flags().GetString("keytab")
+		kdcIP, _ := cmd.Flags().GetString("dc-ip")
 		target, _ := cmd.Flags().GetString("target")
 
 		if targetDC == "" || domain == "" {
 			return fmt.Errorf("--target-dc and --domain are required")
 		}
-		if username == "" || (password == "" && hash == "") {
-			return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
+		if !kerberos && (username == "" || (password == "" && hash == "")) {
+			return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH> or -k for Kerberos)")
 		}
 		if target == "" {
 			return fmt.Errorf("--target is required (sAMAccountName like 'leo' or full DN)")
@@ -48,6 +52,7 @@ Examples:
 		cfg := &pki.ADCSConfig{
 			TargetDC: targetDC, Domain: domain,
 			Username: username, Password: password, Hash: hash,
+			Kerberos: kerberos, CCache: ccache, Keytab: keytabPath, KDCIP: kdcIP,
 		}
 
 		// If target has no commas, it's a sAMAccountName — resolve via LDAP search
@@ -119,4 +124,8 @@ func init() {
 	shadowCmd.Flags().StringP("username", "u", "", "Domain username")
 	shadowCmd.Flags().StringP("password", "p", "", "Domain password")
 	shadowCmd.Flags().String("hash", "", "NTLM hash for pass-the-hash")
+	shadowCmd.Flags().BoolP("kerberos", "k", false, "Use Kerberos authentication (GSSAPI/SPNEGO)")
+	shadowCmd.Flags().String("ccache", "", "Path to Kerberos ccache file (default: KRB5CCNAME env)")
+	shadowCmd.Flags().String("keytab", "", "Path to Kerberos keytab file")
+	shadowCmd.Flags().String("dc-ip", "", "KDC IP address (if different from --target-dc)")
 }

