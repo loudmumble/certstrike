@@ -10,8 +10,10 @@ import (
 var version = "1.0.0"
 
 var rootCmd = &cobra.Command{
-	Use:   "certstrike",
-	Short: "CertStrike — ADCS Exploitation & PKI Attack Framework",
+	Use:          "certstrike",
+	Short:        "CertStrike — ADCS Exploitation & PKI Attack Framework",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	Long: `CertStrike is a pure Go ADCS exploitation framework with integrated C2.
 ESC1-ESC14 detection and exploitation, certificate forging, and cert-auth C2.
 

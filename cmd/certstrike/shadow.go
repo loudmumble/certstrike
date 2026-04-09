@@ -10,8 +10,8 @@ import (
 )
 
 var shadowCmd = &cobra.Command{
-	Use:   "shadow",
-	Short: "Shadow Credentials — msDS-KeyCredentialLink attacks",
+	Use:           "shadow",
+	Short:         "Shadow Credentials — msDS-KeyCredentialLink attacks",
 	Long: `Manage shadow credentials on AD user objects via msDS-KeyCredentialLink.
 Allows PKINIT authentication without requiring a CA.
 
