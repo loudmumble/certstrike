@@ -42,34 +42,21 @@ Examples:
 			return fmt.Errorf("LDAP authentication required: use -u <user> -p <pass> (or --hash <NT_HASH>)")
 		}
 		if target == "" {
-			return fmt.Errorf("--target (DN or sAMAccountName of target user) is required, e.g. victim or CN=victim,CN=Users,DC=%s", strings.ReplaceAll(domain, ".", ",DC="))
-		}
-
-		// If target has no commas, treat it as a sAMAccountName and build the DN
-		if !strings.Contains(target, ",") {
-			dcComponents := "DC=" + strings.ReplaceAll(domain, ".", ",DC=")
-			target = fmt.Sprintf("CN=%s,CN=Users,%s", target, dcComponents)
-			fmt.Printf("[*] Resolved target DN: %s\n", target)
-		} else {
-			// Validate that DN domain components match --domain
-			dcFromDomain := "DC=" + strings.ReplaceAll(domain, ".", ",DC=")
-			// Extract DC= components from the provided DN
-			var dnDCs []string
-			for _, part := range strings.Split(target, ",") {
-				trimmed := strings.TrimSpace(part)
-				if strings.HasPrefix(strings.ToUpper(trimmed), "DC=") {
-					dnDCs = append(dnDCs, trimmed)
-				}
-			}
-			dcFromDN := strings.Join(dnDCs, ",")
-			if !strings.EqualFold(dcFromDN, dcFromDomain) && len(dnDCs) > 0 {
-				fmt.Printf("[!] Warning: DN domain components (%s) don't match --domain (%s)\n", dcFromDN, domain)
-			}
+			return fmt.Errorf("--target is required (sAMAccountName like 'leo' or full DN)")
 		}
 
 		cfg := &pki.ADCSConfig{
 			TargetDC: targetDC, Domain: domain,
 			Username: username, Password: password, Hash: hash,
+		}
+
+		// If target has no commas, it's a sAMAccountName — resolve via LDAP search
+		if !strings.Contains(target, ",") {
+			resolved, err := pki.ResolveSAMAccountName(cfg, target)
+			if err != nil {
+				return fmt.Errorf("resolve target %q: %w", target, err)
+			}
+			target = resolved
 		}
 
 		if doAdd {

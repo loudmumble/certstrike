@@ -15,6 +15,43 @@ import (
 	"github.com/go-ldap/ldap/v3"
 )
 
+// ResolveSAMAccountName searches LDAP for a user by sAMAccountName and returns
+// their distinguished name. This avoids guessing the container (CN=Users vs OU=...).
+func ResolveSAMAccountName(cfg *ADCSConfig, samAccountName string) (string, error) {
+	conn, err := connectLDAP(cfg)
+	if err != nil {
+		return "", fmt.Errorf("LDAP connect: %w", err)
+	}
+	defer conn.Close()
+
+	// Build base DN from domain
+	parts := strings.Split(cfg.Domain, ".")
+	var dcParts []string
+	for _, p := range parts {
+		dcParts = append(dcParts, "DC="+p)
+	}
+	baseDN := strings.Join(dcParts, ",")
+
+	searchReq := ldap.NewSearchRequest(
+		baseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases,
+		1, 0, false,
+		fmt.Sprintf("(sAMAccountName=%s)", ldap.EscapeFilter(samAccountName)),
+		[]string{"distinguishedName"}, nil,
+	)
+
+	result, err := conn.Search(searchReq)
+	if err != nil {
+		return "", fmt.Errorf("LDAP search for sAMAccountName=%s: %w", samAccountName, err)
+	}
+	if len(result.Entries) == 0 {
+		return "", fmt.Errorf("no object found with sAMAccountName=%s in %s", samAccountName, baseDN)
+	}
+
+	dn := result.Entries[0].DN
+	fmt.Printf("[+] Resolved %s -> %s\n", samAccountName, dn)
+	return dn, nil
+}
+
 // KeyCredentialLink TLV entry types (MS-ADTS 2.2.14)
 const (
 	kcVersion             uint16 = 0x0200
