@@ -87,11 +87,13 @@ type StagerConfig struct {
 
 // Start launches the C2 listener with full session management.
 func (l *Listener) Start() error {
+	l.mu.Lock()
 	l.sessions = make(map[string]*ImplantSession)
 	l.commands = make(map[string][]QueuedCommand)
 	l.results = make(map[string][]CommandResult)
 	l.files = make(map[string][]FileDelivery)
 	l.Running = true
+	l.mu.Unlock()
 
 	mux := http.NewServeMux()
 
