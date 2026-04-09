@@ -15,9 +15,9 @@ var autoCmd = &cobra.Command{
 path, forge a certificate, and output PKINIT commands.
 
 Examples:
-  certstrike auto --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local -u user -p pass
-  certstrike auto --dry-run --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local -u user -p pass
-  certstrike auto --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local --attacker-dn "CN=user,CN=Users,DC=corp,DC=local" -u user -p pass`,
+  certstrike auto --target-dc dc01.example.com --domain example.com --upn admin@example.com -u user -p pass
+  certstrike auto --dry-run --target-dc dc01.example.com --domain example.com --upn admin@example.com -u user -p pass
+  certstrike auto --target-dc dc01.example.com --domain example.com --upn admin@example.com --attacker-dn "CN=user,CN=Users,DC=example,DC=com" -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		targetDC, _ := cmd.Flags().GetString("target-dc")
 		domain, _ := cmd.Flags().GetString("domain")

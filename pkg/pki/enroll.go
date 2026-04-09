@@ -329,13 +329,7 @@ func submitCSRHTTP(cfg *ADCSConfig, caHostname string, csrDER []byte, templateNa
 		// Try to extract ReqID from the response
 		reqID := extractReqID(bodyStr)
 		if reqID == "" {
-			// Debug: show the full response to diagnose
-			snippet := bodyStr
-			if len(snippet) > 2000 {
-				snippet = snippet[:2000]
-			}
-			fmt.Printf("[!] Could not find certificate request ID in response\n")
-			fmt.Printf("[DEBUG] Response (%d bytes, HTTP %d):\n%s\n", len(body), resp.StatusCode, snippet)
+			fmt.Printf("[!] Could not find certificate request ID in response (HTTP %d, %d bytes)\n", resp.StatusCode, len(body))
 			lastErr = fmt.Errorf("could not parse ReqID from certsrv response")
 			continue
 		}

@@ -946,7 +946,7 @@ func init() {
 	pkiCmd.Flags().String("template", "", "Certificate template name for exploitation")
 	pkiCmd.Flags().String("pfx-password", "", "Password for PFX archive (default: empty/unencrypted)")
 	pkiCmd.Flags().String("ca", "", "Target CA name for ESC7 exploitation")
-	pkiCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN for ESC9 exploitation (e.g., CN=attacker,CN=Users,DC=corp,DC=local)")
+	pkiCmd.Flags().String("attacker-dn", "", "Attacker's LDAP DN for ESC9 exploitation (e.g., CN=attacker,CN=Users,DC=example,DC=com)")
 	pkiCmd.Flags().String("listener-ip", "", "Attacker relay listener IP for ESC8/ESC11 (triggers PetitPotam coercion)")
 	pkiCmd.Flags().Int("listener-port", 0, "Relay listener port (>1024 for non-admin pivot; uses WebDAV/HTTP instead of SMB)")
 
