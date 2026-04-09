@@ -16,9 +16,9 @@ var shadowCmd = &cobra.Command{
 Allows PKINIT authentication without requiring a CA.
 
 Examples:
-  certstrike shadow --add --target "CN=victim,CN=Users,DC=example,DC=com" --target-dc dc01.example.com --domain example.com -u admin -p pass
-  certstrike shadow --list --target "CN=victim,CN=Users,DC=example,DC=com" --target-dc dc01.example.com --domain example.com -u admin -p pass
-  certstrike shadow --remove --target "CN=victim,CN=Users,DC=example,DC=com" --device-id <guid> --target-dc dc01.example.com --domain example.com -u admin -p pass`,
+  certstrike shadow --add --target victim --target-dc dc01 --domain contoso.com -u admin -p pass
+  certstrike shadow --list --target victim --target-dc dc01 --domain contoso.com -u admin -p pass
+  certstrike shadow --remove --target victim --device-id <guid> --target-dc dc01 --domain contoso.com -u admin -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		doAdd, _ := cmd.Flags().GetBool("add")
 		doList, _ := cmd.Flags().GetBool("list")
@@ -125,7 +125,7 @@ func init() {
 	shadowCmd.Flags().Bool("add", false, "Add a shadow credential to the target")
 	shadowCmd.Flags().Bool("list", false, "List shadow credentials on the target")
 	shadowCmd.Flags().Bool("remove", false, "Remove a shadow credential from the target")
-	shadowCmd.Flags().String("target", "", "Target user DN or sAMAccountName (e.g. 'victim' or 'CN=victim,CN=Users,DC=example,DC=com')")
+	shadowCmd.Flags().String("target", "", "Target user sAMAccountName or full DN (e.g. 'victim' — DN auto-built from --domain)")
 	shadowCmd.Flags().String("device-id", "", "DeviceID of credential to remove")
 	shadowCmd.Flags().String("target-dc", "", "Target domain controller")
 	shadowCmd.Flags().String("domain", "", "Active Directory domain")
