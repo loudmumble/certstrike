@@ -4,6 +4,7 @@
 /smartpotato
 implants/smartpotato/smartpotato
 implants/smartpotato/smartpotato.exe
+implants/smartpotato/smartpotato_linux
 dist/
 build/
 
@@ -15,12 +16,13 @@ build/
 # Vendor
 vendor/
 
-# IDE
+# IDE / tooling state
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.claude/
 
 # OS
 .DS_Store
