@@ -78,16 +78,27 @@ type PKITemplateInfo struct {
 	RequiresManagerApproval bool
 }
 
+// commandResult is a command result returned from the C2 /api/results endpoint.
+type commandResult struct {
+	SessionID string `json:"session_id"`
+	CommandID string `json:"command_id"`
+	Output    string `json:"output"`
+	ExitCode  int    `json:"exit_code"`
+}
+
 // c2DataMsg carries live data fetched from the C2 listener.
 type c2DataMsg struct {
 	Sessions []Session
 	Listener *ListenerInfo
+	Results  []commandResult
 	Err      error
 }
 
 // c2CmdResultMsg carries the result of posting a command to the C2.
 type c2CmdResultMsg struct {
-	Err error
+	LocalID   string // local ID assigned in the TUI (e.g. "cmd-1")
+	CommandID string // real command ID returned by the C2
+	Err       error
 }
 
 // Model is the Bubbletea model for the operator console.
@@ -199,12 +210,23 @@ func fetchC2Data(c2URL string) tea.Cmd {
 			Sessions:    health.Sessions,
 		}
 
-		return c2DataMsg{Sessions: sessions, Listener: listener}
+		// Fetch command results
+		var results []commandResult
+		resultsResp, err := client.Get(c2URL + "/api/results")
+		if err == nil {
+			defer resultsResp.Body.Close()
+			resultsBody, err := io.ReadAll(io.LimitReader(resultsResp.Body, 1<<20))
+			if err == nil {
+				json.Unmarshal(resultsBody, &results)
+			}
+		}
+
+		return c2DataMsg{Sessions: sessions, Listener: listener, Results: results}
 	}
 }
 
 // postC2Command sends a command to the C2 for the given session.
-func postC2Command(c2URL, sessionID, command string) tea.Cmd {
+func postC2Command(c2URL, sessionID, command, localID string) tea.Cmd {
 	return func() tea.Msg {
 		client := newC2Client()
 		payload, _ := json.Marshal(map[string]string{
@@ -213,14 +235,19 @@ func postC2Command(c2URL, sessionID, command string) tea.Cmd {
 		})
 		resp, err := client.Post(c2URL+"/api/command", "application/json", bytes.NewReader(payload))
 		if err != nil {
-			return c2CmdResultMsg{Err: fmt.Errorf("post command: %w", err)}
+			return c2CmdResultMsg{LocalID: localID, Err: fmt.Errorf("post command: %w", err)}
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
-			return c2CmdResultMsg{Err: fmt.Errorf("command rejected (%d): %s", resp.StatusCode, string(body))}
+			return c2CmdResultMsg{LocalID: localID, Err: fmt.Errorf("command rejected (%d): %s", resp.StatusCode, string(body))}
 		}
-		return c2CmdResultMsg{}
+		var result struct {
+			CommandID string `json:"command_id"`
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
+		json.Unmarshal(body, &result)
+		return c2CmdResultMsg{LocalID: localID, CommandID: result.CommandID}
 	}
 }
 
@@ -280,6 +307,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Listener != nil {
 			m.listeners = []ListenerInfo{*msg.Listener}
 		}
+		// Match results to pending commands
+		for _, r := range msg.Results {
+			for i, cmd := range m.commands {
+				if cmd.ID == r.CommandID && !cmd.Done {
+					m.commands[i].Done = true
+					m.commands[i].Output = r.Output
+				}
+			}
+		}
 		if msg.Err != nil {
 			m.statusMsg = fmt.Sprintf("C2: %s", msg.Err)
 		} else {
@@ -290,6 +326,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case c2CmdResultMsg:
 		if msg.Err != nil {
 			m.statusMsg = fmt.Sprintf("Cmd error: %s", msg.Err)
+		} else if msg.CommandID != "" {
+			// Remap local ID to real C2 command ID so results can be matched
+			for i, cmd := range m.commands {
+				if cmd.ID == msg.LocalID {
+					m.commands[i].ID = msg.CommandID
+					break
+				}
+			}
 		}
 		return m, nil
 
@@ -299,8 +343,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				cmdText := m.cmdInput.Value()
 				if cmdText != "" && m.selectedSession != "" {
+					localID := fmt.Sprintf("cmd-%d", len(m.commands)+1)
 					m.commands = append(m.commands, CommandEntry{
-						ID:      fmt.Sprintf("cmd-%d", len(m.commands)+1),
+						ID:      localID,
 						Command: cmdText,
 						Queued:  time.Now(),
 					})
@@ -311,7 +356,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusMsg = fmt.Sprintf("Queued: %s → %s", cmdText, sid)
 					m.cmdInput.Reset()
 					if m.c2URL != "" {
-						return m, postC2Command(m.c2URL, m.selectedSession, cmdText)
+						return m, postC2Command(m.c2URL, m.selectedSession, cmdText, localID)
 					}
 				} else {
 					m.cmdInput.Reset()

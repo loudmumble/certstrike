@@ -111,6 +111,9 @@ func (l *Listener) Start() error {
 	// Operator API — queue command
 	mux.HandleFunc("/api/command", l.handleQueueCommand)
 
+	// Operator API — get command results
+	mux.HandleFunc("/api/results", l.handleGetResults)
+
 	// File delivery and deploy endpoints
 	l.addDeployRoutes(mux)
 
@@ -139,6 +142,7 @@ func (l *Listener) Start() error {
 	fmt.Println("    POST /result       — Command result submission")
 	fmt.Println("    GET  /api/sessions — List active sessions")
 	fmt.Println("    POST /api/command  — Queue command for session")
+	fmt.Println("    GET  /api/results  — Retrieve command results")
 	fmt.Println("    POST /api/deploy   — Upload and deploy file to agent")
 	fmt.Println("    GET  /api/files    — List pending file deliveries")
 	fmt.Println("    GET  /health       — Health check")
@@ -393,6 +397,23 @@ func (l *Listener) handleQueueCommand(w http.ResponseWriter, r *http.Request) {
 		"status":     "queued",
 		"command_id": cmdID,
 	})
+}
+
+// handleGetResults returns command results, optionally filtered by session_id query param.
+func (l *Listener) handleGetResults(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+
+	sessionID := r.URL.Query().Get("session_id")
+	results := l.GetResults(sessionID)
+	if results == nil {
+		results = []CommandResult{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
 }
 
 // shortID safely truncates an ID string to 8 chars for logging.

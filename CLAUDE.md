@@ -38,12 +38,12 @@ cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 - NTLM pass-the-hash support for enrollment (`--hash` flag, no plaintext password needed)
 - ESC1 misconfigured templates (enrollee supplies subject + auth EKU)
 - ESC2 Any Purpose EKU templates
-- ESC3 Enrollment Agent templates (two-stage attack)
+- ESC3 Enrollment Agent templates (two-stage CMC co-signed enrollment via RPC)
 - ESC4 vulnerable template ACLs (full binary ACE parsing, WriteDACL/WriteOwner, LDAP modify + restore)
-- ESC5 vulnerable PKI object ACLs on CA
+- ESC5 vulnerable PKI object ACLs on CA (detection — chains to ESC7 for exploitation)
 - ESC6 EDITF_ATTRIBUTESUBJECTALTNAME2 on CA enrollment service (SAN injection via request attributes)
 - ESC7 vulnerable CA ACLs (ManageCA → enable ESC6 → enroll → restore)
-- ESC8 HTTP web enrollment relay detection + PetitPotam coercion trigger
+- ESC8 HTTP web enrollment relay detection + PetitPotam/PrinterBug coercion
 - ESC9 CT_FLAG_NO_SECURITY_EXTENSION detection + UPN swap exploitation (LDAP modify + restore)
 - ESC10 weak certificate mapping detection
 - ESC11 RPC interface encryption enforcement detection
