@@ -49,10 +49,14 @@ Examples:
 			return fmt.Errorf("--target is required (sAMAccountName like 'leo' or full DN)")
 		}
 
+		useTLS, _ := cmd.Flags().GetBool("ldaps")
+		useStartTLS, _ := cmd.Flags().GetBool("start-tls")
+
 		cfg := &pki.ADCSConfig{
 			TargetDC: targetDC, Domain: domain,
 			Username: username, Password: password, Hash: hash,
 			Kerberos: kerberos, CCache: ccache, Keytab: keytabPath, KDCIP: kdcIP,
+			UseTLS: useTLS, UseStartTLS: useStartTLS,
 		}
 
 		// If target has no commas, it's a sAMAccountName — resolve via LDAP search
@@ -128,4 +132,6 @@ func init() {
 	shadowCmd.Flags().String("ccache", "", "Path to Kerberos ccache file (default: KRB5CCNAME env)")
 	shadowCmd.Flags().String("keytab", "", "Path to Kerberos keytab file")
 	shadowCmd.Flags().String("dc-ip", "", "KDC IP address (if different from --target-dc)")
+	shadowCmd.Flags().Bool("ldaps", false, "Use LDAPS (TLS on port 636)")
+	shadowCmd.Flags().Bool("start-tls", false, "Use StartTLS (upgrade on port 389)")
 }

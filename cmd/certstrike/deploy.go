@@ -86,7 +86,9 @@ Examples:
 		fmt.Printf("    File:     %s (%d bytes)\n", filepath.Base(filePath), len(data))
 		fmt.Printf("    Remote:   %s\n", remotePath)
 		fmt.Printf("    Execute:  %v\n", execute)
-		fmt.Printf("    Delivery: %s\n", result["delivery_id"])
+		if did, ok := result["delivery_id"]; ok && did != nil {
+			fmt.Printf("    Delivery: %v\n", did)
+		}
 		return nil
 	},
 }

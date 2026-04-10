@@ -73,7 +73,7 @@ Examples:
 			// THEFT4 is automated via LDAP — run real extraction if credentials provided
 			if strings.EqualFold(certTheft, "theft4") {
 				cfg := buildADCSConfig(cmd)
-				if cfg.TargetDC != "" && cfg.Domain != "" {
+				if cfg.TargetDC != "" && cfg.Domain != "" && (cfg.Kerberos || cfg.Username != "") {
 					outputDir, _ := cmd.Flags().GetString("output")
 					if outputDir == "" {
 						outputDir = "theft4_certs"

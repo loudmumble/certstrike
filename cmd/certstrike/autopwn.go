@@ -49,12 +49,16 @@ Examples:
 		if outputDir == "" {
 			outputDir = "./out"
 		}
+		useTLS, _ := cmd.Flags().GetBool("ldaps")
+		useStartTLS, _ := cmd.Flags().GetBool("start-tls")
+		stealth, _ := cmd.Flags().GetBool("stealth")
 
 		cfg := &pki.AutoPwnConfig{
 			ADCSConfig: &pki.ADCSConfig{
 				TargetDC: targetDC, Domain: domain,
 				Username: username, Password: password, Hash: hash,
 				Kerberos: kerberos, CCache: ccache, Keytab: keytabPath, KDCIP: kdcIP,
+				UseTLS: useTLS, UseStartTLS: useStartTLS, Stealth: stealth,
 			},
 			TargetUPN:   upn,
 			AttackerDN:  attackerDN,
@@ -94,4 +98,7 @@ func init() {
 	autoCmd.Flags().String("output-dir", "./out", "Output directory for certs")
 	autoCmd.Flags().Bool("dry-run", false, "Enumerate and plan only, don't exploit")
 	autoCmd.Flags().BoolP("interactive", "i", false, "Interactively select which ESC path(s) to attempt")
+	autoCmd.Flags().Bool("ldaps", false, "Use LDAPS (TLS on port 636)")
+	autoCmd.Flags().Bool("start-tls", false, "Use StartTLS (upgrade on port 389)")
+	autoCmd.Flags().Bool("stealth", false, "Stealth mode (jittered queries, small page sizes)")
 }

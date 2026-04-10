@@ -188,7 +188,7 @@ func (s *Server) runPKIEnumerate(args map[string]interface{}) map[string]interfa
 		Kerberos: kerberos, CCache: ccache, Keytab: keytab, KDCIP: dcIP,
 	}
 
-	templates, err := pki.Enumerate(cfg)
+	templates, err := pki.EnumerateTemplates(cfg)
 	if err != nil {
 		return toolError(fmt.Sprintf("Enumeration failed: %v", err))
 	}
