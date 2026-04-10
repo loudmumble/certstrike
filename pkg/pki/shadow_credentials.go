@@ -195,6 +195,7 @@ func AddShadowCredentialWithEntry(cfg *ADCSConfig, targetDN string, entry *KeyCr
 		targetName = dn.RDNs[0].Attributes[0].Value
 	}
 	fmt.Println("[*] Next: use the private key for PKINIT authentication")
+	fmt.Println("[*] Next: PKINIT authentication with the shadow credential key")
 	fmt.Printf("    certipy-ad auth -pfx %s.pfx -dc-ip <DC_IP> -domain %s\n", targetName, cfg.Domain)
 
 	return entry, nil
